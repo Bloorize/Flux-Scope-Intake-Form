@@ -62,14 +62,6 @@ type ExperienceStage = "overview" | "blind-spots" | "questions";
 
 type AiProviderOption = "auto" | "gemini" | "openai" | "zai" | "kimi";
 
-const aiProviderLabels: Record<AiProviderOption, string> = {
-  auto: "Auto (Gemini first)",
-  gemini: "Google Gemini",
-  openai: "OpenAI",
-  zai: "z.ai",
-  kimi: "Kimi K2"
-};
-
 const introSteps: { id: ExperienceStage; badge: string; title: string; description: string }[] = [
   {
     id: "overview",
@@ -878,9 +870,9 @@ export function DiscoveryForm() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [showNavigationError, setShowNavigationError] = useState(false);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
-  const [aiProvider, setAiProvider] = useState<AiProviderOption>("gemini");
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
+  const aiProvider: AiProviderOption = "auto";
 
   const form = useForm<DiscoveryValidatedValues>({
     resolver: zodResolver(discoveryFormSchema) as Resolver<DiscoveryValidatedValues>,
@@ -1423,18 +1415,10 @@ export function DiscoveryForm() {
                 </div>
                 <Progress value={experienceStage === "questions" ? progress : ((introSteps.findIndex((step) => step.id === experienceStage) + 1) / introSteps.length) * 100} />
                 <div className="space-y-1 pt-2">
-                  <label className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">AI model</label>
-                  <select
-                    className="h-9 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)]"
-                    onChange={(event) => setAiProvider(event.target.value as AiProviderOption)}
-                    value={aiProvider}
-                  >
-                    {(Object.keys(aiProviderLabels) as AiProviderOption[]).map((option) => (
-                      <option key={option} value={option}>
-                        {aiProviderLabels[option]}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">AI routing</label>
+                  <div className="h-9 rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 text-sm leading-9 text-[var(--foreground)]">
+                    Auto
+                  </div>
                 </div>
               </div>
             </div>
