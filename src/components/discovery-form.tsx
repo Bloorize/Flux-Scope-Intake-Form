@@ -1,8 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Bot, Check, ChevronLeft, ChevronRight, CircleAlert, FileJson2, LoaderCircle, ShieldAlert, Sparkles, X } from "lucide-react";
-import Image from "next/image";
+import { Bot, Check, ChevronLeft, ChevronRight, CircleAlert, FileJson2, LoaderCircle, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useForm, useWatch, type Control, type FieldErrors, type Path, type Resolver, type UseFormRegister, type UseFormSetValue } from "react-hook-form";
 import {
@@ -36,7 +35,6 @@ import {
   spaceTypeGovernanceOptions
 } from "../domain/discovery";
 import { cn } from "../lib/utils";
-import ruxtonLogo from "../ruxton_logo2.png";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -51,20 +49,50 @@ type SubmissionState = {
   response: { status: string; receivedAt: string; id: string };
 };
 
-type SectionReviewState = {
+type QuestionAiState = {
   review?: AiReviewResponse;
   error?: string;
+  draft?: string;
+  isReviewing?: boolean;
+  isGenerating?: boolean;
   updatedAt?: string;
 };
 
-type AiProviderOption = "auto" | "openai" | "zai" | "kimi";
+type ExperienceStage = "overview" | "blind-spots" | "questions";
+
+type AiProviderOption = "auto" | "gemini" | "openai" | "zai" | "kimi";
 
 const aiProviderLabels: Record<AiProviderOption, string> = {
-  auto: "Auto (recommended)",
+  auto: "Auto (Gemini first)",
+  gemini: "Google Gemini",
   openai: "OpenAI",
   zai: "z.ai",
   kimi: "Kimi K2"
 };
+
+const introSteps: { id: ExperienceStage; badge: string; title: string; description: string }[] = [
+  {
+    id: "overview",
+    badge: "AI kickoff summary",
+    title: "Align the scope before asking for details",
+    description:
+      "This intake starts by framing the likely solution shape, then highlights the biggest unknowns, then moves into guided questions one at a time."
+  },
+  {
+    id: "blind-spots",
+    badge: "Blind spots and gaps",
+    title: "Surface the decisions that most often derail scope",
+    description:
+      "The form will push for launch boundaries, current-state reality, mobile and offline constraints, and phased AI expectations without assuming technical fluency."
+  },
+  {
+    id: "questions",
+    badge: "Guided Q&A",
+    title: "Answer one question at a time",
+    description:
+      "Each answer can be reviewed inline with AI for that specific question, and navigation only moves forward after the current section is complete."
+  }
+];
 
 const getErrorMessage = (errors: FieldErrors<DiscoveryValidatedValues>, path: string) => {
   const value = path.split(".").reduce<unknown>((accumulator, part) => {
@@ -74,32 +102,36 @@ const getErrorMessage = (errors: FieldErrors<DiscoveryValidatedValues>, path: st
     return undefined;
   }, errors);
 
-  if (value && typeof value === "object" && "message" in value && typeof value.message === "string") {
-    return value.message;
-  }
+  const findNestedMessage = (candidate: unknown): string | undefined => {
+    if (!candidate || typeof candidate !== "object") {
+      return undefined;
+    }
 
-  return undefined;
+    if ("message" in candidate && typeof candidate.message === "string") {
+      return candidate.message;
+    }
+
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        const message = findNestedMessage(item);
+        if (message) {
+          return message;
+        }
+      }
+      return undefined;
+    }
+
+    for (const nestedValue of Object.values(candidate as Record<string, unknown>)) {
+      const message = findNestedMessage(nestedValue);
+      if (message) {
+        return message;
+      }
+    }
+    return undefined;
+  };
+
+  return findNestedMessage(value);
 };
-
-const collectStringLeafPaths = (value: unknown, prefix = ""): string[] => {
-  if (typeof value === "string") {
-    return [prefix];
-  }
-
-  if (Array.isArray(value)) {
-    return value.flatMap((item, index) => collectStringLeafPaths(item, prefix ? `${prefix}.${index}` : String(index)));
-  }
-
-  if (value && typeof value === "object") {
-    return Object.entries(value).flatMap(([key, nestedValue]) =>
-      collectStringLeafPaths(nestedValue, prefix ? `${prefix}.${key}` : key)
-    );
-  }
-
-  return [];
-};
-
-const formatPathLabel = (path: string) => path.replace(/\.(\d+)/g, " [$1]").replace(/\./g, " > ");
 
 const buildQaDummyValues = (): DiscoveryValidatedValues => ({
   phase1Scope: {
@@ -298,22 +330,37 @@ const buildQaDummyValues = (): DiscoveryValidatedValues => ({
 });
 
 function FieldShell({
+  questionNumber,
   label,
   explanation,
   example,
   error,
-  children
+  children,
+  ai
 }: {
+  questionNumber?: number;
   label: string;
   explanation: string;
   example?: string;
   error?: string;
   children: React.ReactNode;
+  ai?: {
+    reviewState?: QuestionAiState;
+    onReview: () => void;
+    onGenerateDraft: () => void;
+    onDraftChange: (value: string) => void;
+    onApplyDraft: () => void;
+  };
 }) {
+  const review = ai?.reviewState?.review;
+
   return (
-    <div className="space-y-3" data-question-shell="true">
-      <div className="space-y-1">
-        <label className="text-sm font-semibold text-[var(--foreground)]">{label}</label>
+    <div className="space-y-4" data-question-shell="true">
+      <div className="space-y-2">
+        {questionNumber ? (
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">Question {String(questionNumber).padStart(2, "0")}</div>
+        ) : null}
+        <label className="block text-xl font-semibold leading-tight text-[var(--foreground)] md:text-2xl">{label}</label>
         <p className="text-sm leading-6 text-[var(--muted-foreground)]">{explanation}</p>
         {example ? (
           <details className="rounded-md border border-dashed border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--muted-foreground)]">
@@ -328,6 +375,66 @@ function FieldShell({
           <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </p>
+      ) : null}
+      {ai ? (
+        <div className="space-y-3 rounded-2xl border border-[var(--border)] bg-white/90 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--foreground)]">AI assist for this question</p>
+              <p className="text-sm leading-6 text-[var(--muted-foreground)]">
+                Review this answer in context or generate a cleaner draft without leaving the question.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={ai.reviewState?.isReviewing} onClick={ai.onReview} type="button" variant="secondary">
+                {ai.reviewState?.isReviewing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                Review answer
+              </Button>
+              <Button disabled={ai.reviewState?.isGenerating} onClick={ai.onGenerateDraft} type="button" variant="ghost">
+                {ai.reviewState?.isGenerating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Improve answer
+              </Button>
+            </div>
+          </div>
+
+          {ai.reviewState?.error ? (
+            <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
+              {ai.reviewState.error}
+            </div>
+          ) : null}
+
+          {review ? (
+            <div className="space-y-3 rounded-xl bg-[var(--muted)] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge>{review.status === "pass" ? "Ready" : "Needs detail"}</Badge>
+                <span className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                  confidence {Math.round(review.confidence * 100)}%
+                </span>
+              </div>
+              <p className="text-sm leading-6 text-[var(--foreground)]">{review.summary}</p>
+              {review.followUpQuestions.length > 0 ? (
+                <ul className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
+                  {review.followUpQuestions.map((item) => (
+                    <li className="rounded-xl bg-white px-3 py-2" key={item}>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+
+          {ai.reviewState?.draft ? (
+            <div className="space-y-3">
+              <Textarea rows={8} value={ai.reviewState.draft} onChange={(event) => ai.onDraftChange(event.target.value)} />
+              <div className="flex justify-end">
+                <Button disabled={!ai.reviewState.draft.trim()} onClick={ai.onApplyDraft} type="button">
+                  Apply to this answer
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -372,14 +479,17 @@ function ChoiceCard({
 }
 
 function StringListField({
+  questionNumber,
   label,
   explanation,
   example,
   values,
   onChange,
   minItems = 1,
-  error
+  error,
+  ai
 }: {
+  questionNumber?: number;
   label: string;
   explanation: string;
   example?: string;
@@ -387,15 +497,23 @@ function StringListField({
   onChange: (values: string[]) => void;
   minItems?: number;
   error?: string;
+  ai?: {
+    reviewState?: QuestionAiState;
+    onReview: () => void;
+    onGenerateDraft: () => void;
+    onDraftChange: (value: string) => void;
+    onApplyDraft: () => void;
+  };
 }) {
   const visibleValues = values.length === 0 ? [""] : values;
 
   return (
-    <FieldShell label={label} explanation={explanation} example={example} error={error}>
+    <FieldShell ai={ai} error={error} example={example} explanation={explanation} label={label} questionNumber={questionNumber}>
       <div className="space-y-3">
         {visibleValues.map((value, index) => (
-          <div className="flex items-center gap-3" key={`${label}-${index}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center" key={`${label}-${index}`}>
             <Input
+              className="min-w-0 flex-1"
               value={value}
               onChange={(event) => {
                 const nextValues = [...visibleValues];
@@ -409,12 +527,13 @@ function StringListField({
               type="button"
               onClick={() => onChange(visibleValues.filter((_, itemIndex) => itemIndex !== index))}
               disabled={visibleValues.length <= 1}
+              className="w-full sm:w-auto"
             >
               Remove
             </Button>
           </div>
         ))}
-        <Button variant="secondary" type="button" onClick={() => onChange([...visibleValues, ""])}>
+        <Button variant="secondary" type="button" onClick={() => onChange([...visibleValues, ""])} disabled={visibleValues.length >= Math.max(minItems, 8)}>
           Add entry
         </Button>
       </div>
@@ -452,15 +571,25 @@ function RadioStack({
 }
 
 function WorkflowEditor({
+  questionNumber,
   control,
   register,
   errors,
-  setValue
+  setValue,
+  ai
 }: {
+  questionNumber?: number;
   control: Control<DiscoveryValidatedValues>;
   register: UseFormRegister<DiscoveryValidatedValues>;
   errors: FieldErrors<DiscoveryValidatedValues>;
   setValue: UseFormSetValue<DiscoveryValidatedValues>;
+  ai?: {
+    reviewState?: QuestionAiState;
+    onReview: () => void;
+    onGenerateDraft: () => void;
+    onDraftChange: (value: string) => void;
+    onApplyDraft: () => void;
+  };
 }) {
   const watchedWorkflows = useWatch({ control, name: "workflows.topDailyWorkflows" }) as
     | DiscoveryValidatedValues["workflows"]["topDailyWorkflows"]
@@ -469,10 +598,12 @@ function WorkflowEditor({
 
   return (
     <FieldShell
+      ai={ai}
       label="Top 3 workflows used daily"
       explanation="Each workflow must specify the actor, the exact action, and the business outcome."
       example="Site supervisor assigns an inspection route by building and floor, inspector captures room-level findings with photos, and regional manager reviews same-day exception alerts to trigger corrective work items."
       error={getErrorMessage(errors, "workflows.topDailyWorkflows")}
+      questionNumber={questionNumber}
     >
       <div className="space-y-4">
         {(workflows ?? []).map((workflow, index) => (
@@ -738,224 +869,16 @@ function SummaryPanel({ submission }: { submission: SubmissionState }) {
   );
 }
 
-function AiReviewModal({
-  open,
-  isLoading,
-  reviewState,
-  onClose,
-  onContinue,
-  onGenerateDraft,
-  onApplyDraft,
-  isGeneratingDraft,
-  draft,
-  onDraftChange,
-  draftTargetPath,
-  onDraftTargetChange,
-  draftTargets,
-  draftError
-}: {
-  open: boolean;
-  isLoading: boolean;
-  reviewState?: SectionReviewState;
-  onClose: () => void;
-  onContinue: () => void;
-  onGenerateDraft: () => void;
-  onApplyDraft: () => void;
-  isGeneratingDraft: boolean;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  draftTargetPath: string;
-  onDraftTargetChange: (value: string) => void;
-  draftTargets: Array<{ path: string; label: string }>;
-  draftError?: string | null;
-}) {
-  if (!open) {
-    return null;
-  }
-
-  const review = reviewState?.review;
-  const needsClarification = review?.status === "needs_clarification";
-
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4">
-      <div className="flex min-h-full items-center justify-center">
-        <Card className="flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col overflow-hidden">
-        <CardHeader className="border-b border-[var(--border)] bg-white">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-2">
-              <Badge>AI review</Badge>
-              <CardTitle className="flex items-center gap-2">
-                <Bot className="h-5 w-5 text-[var(--accent)]" />
-                Section quality check
-              </CardTitle>
-              <CardDescription>
-                Stay on this screen while the review runs, then use the actions below to continue or improve the answer.
-              </CardDescription>
-            </div>
-            <Button onClick={onClose} type="button" variant="ghost">
-              <X className="h-4 w-4" />
-              Close
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
-          {isLoading ? (
-            <div className="rounded-xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] px-4 py-6 text-sm text-[var(--foreground)]">
-              <div className="flex items-center gap-2 font-semibold">
-                <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />
-                AI is reviewing this section
-              </div>
-              <p className="mt-2 leading-6 text-[var(--muted-foreground)]">
-                Please wait. We are checking specificity and preparing suggested improvements if needed.
-              </p>
-            </div>
-          ) : null}
-
-          {!isLoading && reviewState?.error ? (
-            <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
-              {reviewState.error}
-            </div>
-          ) : null}
-
-          {!isLoading && review ? (
-            <>
-              <div
-                className={cn(
-                  "rounded-xl px-4 py-3 text-sm",
-                  review.status === "pass" ? "bg-[var(--accent-soft)] text-[var(--foreground)]" : "border border-[var(--danger)]/20 bg-white text-[var(--foreground)]"
-                )}
-              >
-                <div className="flex items-center gap-2 font-semibold">
-                  {review.status === "pass" ? (
-                    <Check className="h-4 w-4 text-[var(--accent)]" />
-                  ) : (
-                    <ShieldAlert className="h-4 w-4 text-[var(--danger)]" />
-                  )}
-                  {review.status === "pass" ? "Ready to continue" : "Needs clarification"}
-                  <span className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                    confidence {Math.round(review.confidence * 100)}%
-                  </span>
-                </div>
-                <p className="mt-2 leading-6">{review.summary}</p>
-              </div>
-
-              {review.followUpQuestions.length > 0 ? (
-                <div>
-                  <h3 className="text-sm font-semibold text-[var(--foreground)]">What to improve next</h3>
-                  <ul className="mt-2 space-y-2 text-sm leading-6 text-[var(--foreground)]">
-                    {review.followUpQuestions.map((item) => (
-                      <li className="rounded-xl bg-[var(--muted)] px-4 py-3" key={item}>
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-
-          {!isLoading && needsClarification ? (
-            <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--muted)] p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-[var(--foreground)]">AI-assisted rewrite</h3>
-                <Button disabled={isGeneratingDraft} onClick={onGenerateDraft} type="button" variant="secondary">
-                  {isGeneratingDraft ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  Generate better draft
-                </Button>
-              </div>
-
-              {draftError ? <p className="text-sm text-[var(--danger)]">{draftError}</p> : null}
-
-              {draft ? (
-                <div className="space-y-3">
-                  <p className="text-sm leading-6 text-[var(--muted-foreground)]">
-                    Edit this draft if needed, choose where it should be inserted, then apply it and re-run review.
-                  </p>
-                  <Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} />
-                  <select
-                    className="h-10 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)]"
-                    onChange={(event) => onDraftTargetChange(event.target.value)}
-                    value={draftTargetPath}
-                  >
-                    {draftTargets.map((target) => (
-                      <option key={target.path} value={target.path}>
-                        {target.label}
-                      </option>
-                    ))}
-                  </select>
-                  <Button disabled={!draftTargetPath || !draft.trim()} onClick={onApplyDraft} type="button">
-                    Apply draft and re-check
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </CardContent>
-
-        <div className="shrink-0 flex items-center justify-end gap-3 border-t border-[var(--border)] bg-white px-6 py-4">
-          {needsClarification ? (
-            <Button onClick={onContinue} type="button" variant="secondary">
-              Continue anyway
-            </Button>
-          ) : null}
-          <Button onClick={onClose} type="button" variant="ghost">
-            Done
-          </Button>
-        </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function SectionSummary({ values }: { values: DiscoveryValidatedValues }) {
-  const chosenFeatures = values.phase1Scope.selectedFeatures.length;
-  const chosenIntegrations = values.integrations.selectedSystems.length;
-  const offline = values.offlineRequirements.supportLevel;
-
-  return (
-    <Card className="sticky top-6">
-      <CardHeader>
-        <div className="flex justify-center">
-          <Image alt="Ruxton logo" className="h-auto w-[170px] max-w-full object-contain" priority src={ruxtonLogo} />
-        </div>
-        <Badge>Scope snapshot</Badge>
-        <CardTitle>Discovery signal</CardTitle>
-        <CardDescription>Live summary for scoping discipline while the user progresses through the wizard.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm leading-6 text-[var(--foreground)]">
-        <div className="rounded-xl bg-[var(--muted)] p-4">
-          <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Day 1 scope</div>
-          <div className="mt-1 font-semibold">{chosenFeatures || 0} selected capability areas</div>
-        </div>
-        <div className="rounded-xl bg-[var(--muted)] p-4">
-          <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Integrations</div>
-          <div className="mt-1 font-semibold">{chosenIntegrations || 0} launch integrations</div>
-        </div>
-        <div className="rounded-xl bg-[var(--muted)] p-4">
-          <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Offline posture</div>
-          <div className="mt-1 font-semibold capitalize">{offline}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 export function DiscoveryForm() {
+  const [experienceStage, setExperienceStage] = useState<ExperienceStage>("overview");
   const [currentStep, setCurrentStep] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [questionCount, setQuestionCount] = useState(0);
   const [submission, setSubmission] = useState<SubmissionState | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [aiReviewBySection, setAiReviewBySection] = useState<Record<string, SectionReviewState>>({});
-  const [isReviewing, setIsReviewing] = useState(false);
-  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [pendingReviewAction, setPendingReviewAction] = useState<"next" | "submit" | null>(null);
-  const [pendingSubmitValues, setPendingSubmitValues] = useState<DiscoveryValidatedValues | null>(null);
-  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
-  const [draftSuggestion, setDraftSuggestion] = useState("");
-  const [draftTargetPath, setDraftTargetPath] = useState("");
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [aiProvider, setAiProvider] = useState<AiProviderOption>("kimi");
+  const [showNavigationError, setShowNavigationError] = useState(false);
+  const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
+  const [aiProvider, setAiProvider] = useState<AiProviderOption>("gemini");
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
 
@@ -1136,21 +1059,6 @@ export function DiscoveryForm() {
   const progress = useMemo(() => ((currentStep + 1) / discoverySections.length) * 100, [currentStep]);
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
-  const sectionRootPathById: Record<string, Path<DiscoveryValidatedValues>> = {
-    phase1: "phase1Scope",
-    criticality: "criticality",
-    baseline: "currentBaseline",
-    mobile: "mobileRequirements",
-    offline: "offlineRequirements",
-    integrations: "integrations",
-    "analytics-ai": "analyticsAi",
-    workflows: "workflows",
-    scale: "scale",
-    delivery: "delivery",
-    "phase1-confirmation": "phase1Confirmation",
-    "phase2-roadmap": "phase2Roadmap",
-    "phase3-roadmap": "phase3Roadmap"
-  };
 
   const activeSectionData =
     activeSection.id === "phase1"
@@ -1178,30 +1086,27 @@ export function DiscoveryForm() {
                           : activeSection.id === "phase2-roadmap"
                             ? values.phase2Roadmap
                             : values.phase3Roadmap;
+  const navigationError =
+    activeSection.fieldPaths.map((fieldPath) => getErrorMessage(form.formState.errors, fieldPath)).find(Boolean) ?? null;
 
-  const draftTargets = useMemo(() => {
-    const rootPath = sectionRootPathById[activeSection.id];
-    const leafPaths = collectStringLeafPaths(activeSectionData).filter((path) => path.length > 0);
-    return leafPaths.map((path) => {
-      const fullPath = `${rootPath}.${path}`;
-      return { path: fullPath, label: formatPathLabel(fullPath) };
-    });
-  }, [activeSection.id, activeSectionData]);
+  const kickoffSummary = useMemo(
+    () => [
+      "Likely outcome: a phased scope definition that separates launch-critical workflows from later operational expansion.",
+      "Primary solution themes: guided data capture, operational workflows, integrations, mobile/offline constraints, and a realistic AI roadmap.",
+      "Best-fit collaboration mode: short stakeholder answers with inline AI coaching rather than a standalone review module."
+    ],
+    []
+  );
 
-  const scrollToActiveQuestionTop = () => {
-    const section = questionSectionRef.current;
-    if (!section) {
-      return;
-    }
-
-    const firstQuestion = section.querySelector<HTMLElement>("[data-question-shell='true']");
-    (firstQuestion ?? section).scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  const closeReviewModal = () => {
-    setIsReviewModalOpen(false);
-    window.setTimeout(scrollToActiveQuestionTop, 150);
-  };
+  const blindSpots = useMemo(
+    () => [
+      "Launch boundary: which capabilities truly must exist on Day 1 versus what can wait.",
+      "Current-state friction: the systems, spreadsheets, and manual steps that need replacement first.",
+      "Field execution constraints: whether responsive web is enough or mobile/offline support is genuinely required.",
+      "Future-state ambition: how much analytics and AI belongs later instead of inflating Phase 1."
+    ],
+    []
+  );
 
   useEffect(() => {
     const section = questionSectionRef.current;
@@ -1209,71 +1114,33 @@ export function DiscoveryForm() {
       return;
     }
 
-    const scrollToNextQuestion = (target: HTMLElement) => {
-      const currentQuestion = target.closest("[data-question-shell='true']") as HTMLElement | null;
-      if (!currentQuestion) {
-        return;
-      }
+    const questions = Array.from(section.querySelectorAll<HTMLElement>("[data-question-shell='true']"));
+    setQuestionCount(questions.length);
 
-      const questions = Array.from(section.querySelectorAll<HTMLElement>("[data-question-shell='true']"));
-      const currentIndex = questions.indexOf(currentQuestion);
-      if (currentIndex < 0 || currentIndex >= questions.length - 1) {
-        return;
-      }
+    const nextIndex = questions.length === 0 ? 0 : Math.min(currentQuestionIndex, questions.length - 1);
+    if (nextIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(nextIndex);
+      return;
+    }
 
-      const nextQuestion = questions[currentIndex + 1];
-      nextQuestion.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
+    questions.forEach((question, index) => {
+      question.hidden = index !== nextIndex;
+    });
+  }, [activeSectionData, currentQuestionIndex, currentStep]);
 
-    const handleChange = (event: Event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
-        return;
-      }
+  const setQuestionState = (fieldPath: string, updater: (current: QuestionAiState) => QuestionAiState) => {
+    setQuestionAiState((current) => ({
+      ...current,
+      [fieldPath]: updater(current[fieldPath] ?? {})
+    }));
+  };
 
-      // For free-text fields, wait for focus-out instead of scrolling on every keystroke.
-      if (target instanceof HTMLInputElement && (target.type === "text" || target.type === "number")) {
-        return;
-      }
-      if (target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      window.setTimeout(() => scrollToNextQuestion(target), 120);
-    };
-
-    const handleFocusOut = (event: FocusEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
-        return;
-      }
-
-      const value = target.value.trim();
-      if (!value) {
-        return;
-      }
-
-      if (target instanceof HTMLInputElement && !(target.type === "text" || target.type === "number")) {
-        return;
-      }
-
-      window.setTimeout(() => scrollToNextQuestion(target), 120);
-    };
-
-    section.addEventListener("change", handleChange);
-    section.addEventListener("focusout", handleFocusOut);
-
-    return () => {
-      section.removeEventListener("change", handleChange);
-      section.removeEventListener("focusout", handleFocusOut);
-    };
-  }, [currentStep]);
-
-  const runAiReview = async () => {
-    setApiError(null);
-    setIsReviewing(true);
-    setIsReviewModalOpen(true);
-    setDraftError(null);
+  const runQuestionReview = async (fieldPath: string, questionLabel: string, answer: unknown) => {
+    setQuestionState(fieldPath, (current) => ({
+      ...current,
+      error: undefined,
+      isReviewing: true
+    }));
 
     try {
       const response = await fetch("/api/ai/review", {
@@ -1284,7 +1151,9 @@ export function DiscoveryForm() {
           sectionTitle: activeSection.title,
           objective: activeSection.aiObjective,
           checklist: activeSection.aiChecklist,
-          sectionData: activeSectionData,
+          questionLabel,
+          fieldPath,
+          sectionData: { answer },
           fullSnapshot: values,
           aiProvider
         })
@@ -1293,42 +1162,41 @@ export function DiscoveryForm() {
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string; detail?: string } | null;
         const message = payload?.error ?? "AI review failed.";
-        setAiReviewBySection((current) => ({
+        setQuestionState(fieldPath, (current) => ({
           ...current,
-          [activeSection.id]: {
-            error: payload?.detail ? `${message} ${payload.detail}` : message,
-            updatedAt: new Date().toISOString()
-          }
+          error: payload?.detail ? `${message} ${payload.detail}` : message,
+          isReviewing: false,
+          updatedAt: new Date().toISOString()
         }));
         return null;
       }
 
       const payload = aiReviewResponseSchema.parse(await response.json());
-      setAiReviewBySection((current) => ({
+      setQuestionState(fieldPath, (current) => ({
         ...current,
-        [activeSection.id]: {
-          review: payload,
-          updatedAt: new Date().toISOString()
-        }
+        review: payload,
+        error: undefined,
+        isReviewing: false,
+        updatedAt: new Date().toISOString()
       }));
       return payload;
     } catch {
-      setAiReviewBySection((current) => ({
+      setQuestionState(fieldPath, (current) => ({
         ...current,
-        [activeSection.id]: {
-          error: "AI review is temporarily unavailable. Local validation still applies, but AI strict checks could not run.",
-          updatedAt: new Date().toISOString()
-        }
+        error: "AI review is temporarily unavailable for this question.",
+        isReviewing: false,
+        updatedAt: new Date().toISOString()
       }));
       return null;
-    } finally {
-      setIsReviewing(false);
     }
   };
 
-  const generateAiDraft = async () => {
-    setDraftError(null);
-    setIsGeneratingDraft(true);
+  const generateQuestionDraft = async (fieldPath: string, questionLabel: string, answer: unknown) => {
+    setQuestionState(fieldPath, (current) => ({
+      ...current,
+      error: undefined,
+      isGenerating: true
+    }));
 
     try {
       const response = await fetch("/api/ai/improve", {
@@ -1339,7 +1207,9 @@ export function DiscoveryForm() {
           sectionTitle: activeSection.title,
           objective: activeSection.aiObjective,
           checklist: activeSection.aiChecklist,
-          sectionData: activeSectionData,
+          questionLabel,
+          fieldPath,
+          sectionData: { answer },
           fullSnapshot: values,
           aiProvider
         })
@@ -1347,40 +1217,66 @@ export function DiscoveryForm() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string; detail?: string } | null;
-        setDraftError(payload?.error ?? "Could not generate a draft right now.");
+        setQuestionState(fieldPath, (current) => ({
+          ...current,
+          error: payload?.error ?? "Could not generate a draft right now.",
+          isGenerating: false
+        }));
         return;
       }
 
       const payload = (await response.json()) as { draft?: string };
       const nextDraft = payload.draft?.trim() ?? "";
       if (!nextDraft) {
-        setDraftError("AI did not return a usable draft.");
+        setQuestionState(fieldPath, (current) => ({
+          ...current,
+          error: "AI did not return a usable draft.",
+          isGenerating: false
+        }));
         return;
       }
 
-      setDraftSuggestion(nextDraft);
-      if (!draftTargetPath && draftTargets.length > 0) {
-        setDraftTargetPath(draftTargets[0].path);
-      }
+      setQuestionState(fieldPath, (current) => ({
+        ...current,
+        draft: nextDraft,
+        error: undefined,
+        isGenerating: false
+      }));
     } catch {
-      setDraftError("Could not generate a draft right now.");
-    } finally {
-      setIsGeneratingDraft(false);
+      setQuestionState(fieldPath, (current) => ({
+        ...current,
+        error: "Could not generate a draft right now.",
+        isGenerating: false
+      }));
     }
   };
 
-  const applyAiDraft = async () => {
-    if (!draftTargetPath || !draftSuggestion.trim()) {
-      return;
+  const getQuestionAiProps = (
+    fieldPath: string,
+    questionLabel: string,
+    answer: unknown,
+    applyDraft?: (draft: string) => void
+  ) => ({
+    reviewState: questionAiState[fieldPath],
+    onReview: () => {
+      void runQuestionReview(fieldPath, questionLabel, answer);
+    },
+    onGenerateDraft: () => {
+      void generateQuestionDraft(fieldPath, questionLabel, answer);
+    },
+    onDraftChange: (draft: string) => {
+      setQuestionState(fieldPath, (current) => ({ ...current, draft }));
+    },
+    onApplyDraft: () => {
+      const draft = questionAiState[fieldPath]?.draft?.trim();
+      if (!draft || !applyDraft) {
+        return;
+      }
+
+      applyDraft(draft);
+      void runQuestionReview(fieldPath, questionLabel, draft);
     }
-
-    form.setValue(draftTargetPath as Path<DiscoveryValidatedValues>, draftSuggestion.trim() as never, {
-      shouldDirty: true,
-      shouldValidate: true
-    });
-
-    await runAiReview();
-  };
+  });
 
   const performSubmission = (rawValues: DiscoveryValidatedValues) => {
     setApiError(null);
@@ -1403,48 +1299,49 @@ export function DiscoveryForm() {
 
       const payload = (await response.json()) as SubmissionState["response"];
       setSubmission({ structured, summary, loe, response: payload });
-      closeReviewModal();
-      setPendingReviewAction(null);
-      setPendingSubmitValues(null);
     });
-  };
-
-  const continueAfterReview = () => {
-    if (pendingReviewAction === "next") {
-      setCurrentStep((step) => Math.min(step + 1, discoverySections.length - 1));
-      setPendingReviewAction(null);
-      closeReviewModal();
-      return;
-    }
-
-    if (pendingReviewAction === "submit" && pendingSubmitValues) {
-      performSubmission(pendingSubmitValues);
-      return;
-    }
-
-    closeReviewModal();
   };
 
   const nextStep = async () => {
     const valid = await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
     if (!valid) {
+      setShowNavigationError(true);
       return;
     }
 
-    setPendingReviewAction("next");
-    const review = await runAiReview();
-    if (!review) {
-      return;
-    }
-
-    if (review.status === "pass") {
-      setCurrentStep((step) => Math.min(step + 1, discoverySections.length - 1));
-      setPendingReviewAction(null);
-      closeReviewModal();
-    }
+    setShowNavigationError(false);
+    setCurrentQuestionIndex(0);
+    setCurrentStep((step) => Math.min(step + 1, discoverySections.length - 1));
   };
 
-  const previousStep = () => setCurrentStep((step) => Math.max(step - 1, 0));
+  const jumpToStep = async (nextStepIndex: number) => {
+    if (nextStepIndex === currentStep) {
+      return;
+    }
+
+    if (nextStepIndex < currentStep) {
+      setShowNavigationError(false);
+      setCurrentQuestionIndex(0);
+      setCurrentStep(nextStepIndex);
+      return;
+    }
+
+    const valid = await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
+    if (!valid) {
+      setShowNavigationError(true);
+      return;
+    }
+
+    setShowNavigationError(false);
+    setCurrentQuestionIndex(0);
+    setCurrentStep(nextStepIndex);
+  };
+
+  const previousStep = () => {
+    setShowNavigationError(false);
+    setCurrentQuestionIndex(0);
+    setCurrentStep((step) => Math.max(step - 1, 0));
+  };
 
   const toggleArrayValue = <T extends string>(path: Path<DiscoveryValidatedValues>, currentValues: T[], value: T) => {
     const nextValues = currentValues.includes(value) ? currentValues.filter((item) => item !== value) : [...currentValues, value];
@@ -1452,22 +1349,16 @@ export function DiscoveryForm() {
   };
 
   const submit = form.handleSubmit(async (rawValues) => {
-    setPendingReviewAction("submit");
-    setPendingSubmitValues(rawValues);
-    const review = await runAiReview();
-    if (review?.status === "pass") {
-      performSubmission(rawValues);
-    }
+    performSubmission(rawValues);
   });
 
   const quickQaSubmit = () => {
     const dummyValues = buildQaDummyValues();
     setApiError(null);
-    setPendingReviewAction(null);
-    setPendingSubmitValues(null);
-    closeReviewModal();
+    setShowNavigationError(false);
     form.reset(dummyValues);
     setCurrentStep(discoverySections.length - 1);
+    setExperienceStage("questions");
     performSubmission(dummyValues);
   };
 
@@ -1491,6 +1382,8 @@ export function DiscoveryForm() {
                 <Button
                   onClick={() => {
                     setSubmission(null);
+                    setExperienceStage("questions");
+                    setCurrentQuestionIndex(0);
                     setCurrentStep(0);
                   }}
                   type="button"
@@ -1508,76 +1401,128 @@ export function DiscoveryForm() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
-      <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <SectionSummary values={values} />
-
-        <div className="space-y-6">
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b border-[var(--border)] bg-white/80 backdrop-blur">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="space-y-3">
-                  <Badge>Enterprise operations platform discovery</Badge>
-                  <div>
-                    <h1 className="text-3xl font-semibold tracking-tight text-[var(--foreground)] md:text-4xl">Structured discovery wizard</h1>
-                    <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
-                      This flow blocks vague answers, forces phase separation, and produces a scoping-grade output for architecture and LOE estimation.
-                    </p>
-                  </div>
-                </div>
-                <div className="min-w-[220px] space-y-2">
-                  <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
-                    <span>Progress</span>
-                    <span>
-                      {currentStep + 1} / {discoverySections.length}
-                    </span>
-                  </div>
-                  <Progress value={progress} />
-                  <div className="space-y-1 pt-2">
-                    <label className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">AI model</label>
-                    <select
-                      className="h-9 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)]"
-                      onChange={(event) => setAiProvider(event.target.value as AiProviderOption)}
-                      value={aiProvider}
-                    >
-                      {(Object.keys(aiProviderLabels) as AiProviderOption[]).map((option) => (
-                        <option key={option} value={option}>
-                          {aiProviderLabels[option]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+      <div className="mx-auto max-w-6xl space-y-6">
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-[var(--border)] bg-white/80 backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-3">
+                <Badge>Enterprise operations platform discovery</Badge>
+                <div>
+                  <h1 className="text-3xl font-semibold tracking-tight text-[var(--foreground)] md:text-4xl">Guided scope intake</h1>
+                  <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
+                    This version leads with orientation, then moves through one visible question at a time with inline AI help attached to the exact answer being edited.
+                  </p>
                 </div>
               </div>
-            </CardHeader>
+              <div className="min-w-[220px] space-y-2">
+                <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                  <span>Progress</span>
+                  <span>
+                    {experienceStage === "questions" ? `${currentStep + 1} / ${discoverySections.length}` : `${introSteps.findIndex((step) => step.id === experienceStage) + 1} / ${introSteps.length}`}
+                  </span>
+                </div>
+                <Progress value={experienceStage === "questions" ? progress : ((introSteps.findIndex((step) => step.id === experienceStage) + 1) / introSteps.length) * 100} />
+                <div className="space-y-1 pt-2">
+                  <label className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">AI model</label>
+                  <select
+                    className="h-9 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)]"
+                    onChange={(event) => setAiProvider(event.target.value as AiProviderOption)}
+                    value={aiProvider}
+                  >
+                    {(Object.keys(aiProviderLabels) as AiProviderOption[]).map((option) => (
+                      <option key={option} value={option}>
+                        {aiProviderLabels[option]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
 
-            <CardContent className="grid gap-6 px-0 pb-0 lg:grid-cols-[260px_minmax(0,1fr)]">
-              <aside className="border-b border-[var(--border)] bg-[var(--muted)] p-6 lg:border-b-0 lg:border-r">
-                <ol className="space-y-3">
-                  {discoverySections.map((section, index) => (
-                    <li key={section.id}>
-                      <button
-                        className={cn(
-                          "w-full rounded-xl px-4 py-3 text-left transition-colors",
-                          index === currentStep ? "bg-white text-[var(--foreground)] shadow-sm" : "text-[var(--muted-foreground)] hover:bg-white/60"
-                        )}
-                        onClick={() => setCurrentStep(index)}
-                        type="button"
-                      >
-                        <div className="text-xs uppercase tracking-[0.16em]">{String(index + 1).padStart(2, "0")}</div>
-                        <div className="mt-1 font-semibold">{section.shortTitle}</div>
-                        <div className="mt-1 text-sm leading-6">{section.description}</div>
-                      </button>
-                    </li>
+          {experienceStage !== "questions" ? (
+            <CardContent className="space-y-6 p-6 md:p-8">
+              <div className="grid gap-4 md:grid-cols-3">
+                {introSteps.map((step) => (
+                  <button
+                    key={step.id}
+                    type="button"
+                    onClick={() => setExperienceStage(step.id)}
+                    className={cn(
+                      "rounded-2xl border px-5 py-4 text-left transition-colors",
+                      experienceStage === step.id ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-sm" : "border-[var(--border)] bg-white hover:bg-[var(--muted)]"
+                    )}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">{step.badge}</div>
+                    <div className="mt-2 text-lg font-semibold text-[var(--foreground)]">{step.title}</div>
+                    <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{step.description}</p>
+                  </button>
+                ))}
+              </div>
+
+              {experienceStage === "overview" ? (
+                <div className="space-y-3">
+                  {kickoffSummary.map((item) => (
+                    <div className="rounded-2xl border border-[var(--border)] bg-white px-5 py-4 text-sm leading-6 text-[var(--foreground)]" key={item}>
+                      {item}
+                    </div>
                   ))}
-                </ol>
-              </aside>
+                </div>
+              ) : null}
 
-              <section className="space-y-6 p-6 md:p-8" ref={questionSectionRef}>
+              {experienceStage === "blind-spots" ? (
+                <div className="space-y-3">
+                  {blindSpots.map((item) => (
+                    <div className="rounded-2xl border border-[var(--border)] bg-white px-5 py-4 text-sm leading-6 text-[var(--foreground)]" key={item}>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => setExperienceStage(experienceStage === "overview" ? "blind-spots" : "questions")}
+                  type="button"
+                >
+                  {experienceStage === "blind-spots" ? "Start questions" : "Review blind spots"}
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardContent>
+          ) : (
+            <CardContent className="space-y-6 p-6 md:p-8">
+              <div className="flex flex-wrap gap-3">
+                {discoverySections.map((section, index) => (
+                  <button
+                    key={section.id}
+                    className={cn(
+                      "rounded-full border px-4 py-2 text-sm transition-colors",
+                      index === currentStep
+                        ? "border-[var(--accent)] bg-[var(--accent)] text-white shadow-sm"
+                        : index < currentStep
+                          ? "border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--foreground)] hover:bg-[var(--accent-soft)]/80"
+                          : "border-[var(--border)] bg-white text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
+                    )}
+                    onClick={() => void jumpToStep(index)}
+                    type="button"
+                    aria-current={index === currentStep ? "step" : undefined}
+                  >
+                    {String(index + 1).padStart(2, "0")} {section.shortTitle}
+                  </button>
+                ))}
+              </div>
+
+              <section className="space-y-6" ref={questionSectionRef}>
                 <div className="space-y-3">
                   <Badge>{activeSection.title}</Badge>
                   <div>
                     <h2 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">{activeSection.prompt}</h2>
                     <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">{activeSection.description}</p>
+                  </div>
+                  <div className="rounded-2xl bg-[var(--muted)] px-4 py-3 text-sm text-[var(--foreground)]">
+                    <span className="font-semibold">Question {Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))}</span>
+                    <span className="text-[var(--muted-foreground)]"> of {Math.max(questionCount, 1)} in this section</span>
                   </div>
                 </div>
 
@@ -1604,6 +1549,12 @@ export function DiscoveryForm() {
 
                       {values.phase1Scope.selectedFeatures.includes("other") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "phase1Scope.otherFeature",
+                            "Describe the additional Day 1 capability",
+                            values.phase1Scope.otherFeature,
+                            (draft) => form.setValue("phase1Scope.otherFeature", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe the additional Day 1 capability"
                           explanation="Explain what the custom Day 1 feature is. Avoid category words alone."
                           example="Permit approval workflow where site leads submit permit requests, regional safety managers approve or reject with comments, and approved permits notify the assigned field team within 15 minutes."
@@ -1615,6 +1566,16 @@ export function DiscoveryForm() {
 
                       {values.phase1Scope.selectedFeatures.map((feature) => (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            `phase1Scope.featureDetails.${feature}`,
+                            `Describe exactly what must work for ${phase1FeatureOptions.find((option) => option.value === feature)?.label ?? feature} on Day 1`,
+                            values.phase1Scope.featureDetails[feature],
+                            (draft) =>
+                              form.setValue(`phase1Scope.featureDetails.${feature}` as Path<DiscoveryValidatedValues>, draft as never, {
+                                shouldDirty: true,
+                                shouldValidate: true
+                              })
+                          )}
                           key={feature}
                           label={`Describe exactly what must work for ${
                             phase1FeatureOptions.find((option) => option.value === feature)?.label ?? feature
@@ -1647,6 +1608,12 @@ export function DiscoveryForm() {
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase1Scope.failEvidenceStandard",
+                          "What evidence is mandatory for failed inspection points?",
+                          values.phase1Scope.failEvidenceStandard,
+                          (draft) => form.setValue("phase1Scope.failEvidenceStandard", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What evidence is mandatory for failed inspection points?"
                         explanation="Define whether photos, comments, and reason codes are required before scoring and submission."
                         example="Each failed point requires at least one photo, a written comment, and a standardized reason code before the room can be submitted or routed for corrective work."
@@ -1656,6 +1623,12 @@ export function DiscoveryForm() {
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase1Scope.jointInspectionExpectation",
+                          "What joint inspection expectation exists by account?",
+                          values.phase1Scope.jointInspectionExpectation,
+                          (draft) => form.setValue("phase1Scope.jointInspectionExpectation", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What joint inspection expectation exists by account?"
                         explanation="State expected cadence, who attends, and what happens when cadence is missed."
                         example="Joint inspections are required monthly per site with customer POC attendance; any missed month creates a manager follow-up case and appears in dashboard exceptions."
@@ -1668,6 +1641,20 @@ export function DiscoveryForm() {
 
                   {currentStep === 1 ? (
                     <StringListField
+                      ai={getQuestionAiProps(
+                        "criticality.consequences",
+                        "If the system is down for 24 hours, what breaks?",
+                        values.criticality.consequences,
+                        (draft) =>
+                          form.setValue(
+                            "criticality.consequences",
+                            draft
+                              .split(/\n+/)
+                              .map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim())
+                              .filter(Boolean),
+                            { shouldDirty: true, shouldValidate: true }
+                          )
+                      )}
                       label="If the system is down for 24 hours, what breaks?"
                       explanation="List specific workflows, who is affected, and what cannot be done. At least three consequences are required."
                       example="Supervisors cannot launch inspections by building and floor, field teams cannot submit failed room photos or reason codes, and regional leaders lose same-day visibility into high-risk sites and overdue corrective actions."
@@ -1681,6 +1668,20 @@ export function DiscoveryForm() {
                   {currentStep === 2 ? (
                     <>
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "currentBaseline.systemsToday",
+                          "What system(s) are you using today?",
+                          values.currentBaseline.systemsToday,
+                          (draft) =>
+                            form.setValue(
+                              "currentBaseline.systemsToday",
+                              draft
+                                .split(/\n+/)
+                                .map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim())
+                                .filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What system(s) are you using today?"
                         explanation="List named systems, spreadsheets, portals, or manual processes currently used."
                         example="Supervisors use ADP for team roster and site assignment data, managers track inspections in SharePoint lists, and regional reporting is compiled weekly in Power BI plus exported Excel files."
@@ -1690,6 +1691,20 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "currentBaseline.systemsToday")}
                       />
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "currentBaseline.mustReplace",
+                          "What exactly must be replaced?",
+                          values.currentBaseline.mustReplace,
+                          (draft) =>
+                            form.setValue(
+                              "currentBaseline.mustReplace",
+                              draft
+                                .split(/\n+/)
+                                .map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim())
+                                .filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What EXACTLY must be replaced?"
                         explanation="List specific workflows, modules, or data processes that cannot remain in the legacy environment."
                         example="Replace paper inspection checklists with room-level mobile scoring, replace email-based issue assignment with tracked work items, and replace manual complaint logs with case lifecycle tracking."
@@ -1699,6 +1714,20 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "currentBaseline.mustReplace")}
                       />
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "currentBaseline.canDefer",
+                          "What can be deferred?",
+                          values.currentBaseline.canDefer,
+                          (draft) =>
+                            form.setValue(
+                              "currentBaseline.canDefer",
+                              draft
+                                .split(/\n+/)
+                                .map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim())
+                                .filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What can be deferred?"
                         explanation="List items that are useful but not required for Phase 1 operations."
                         example="Historical migration older than 12 months, advanced executive benchmarking packs, and non-critical custom report exports can be deferred to Phase 2 without impacting launch operations."
@@ -1790,6 +1819,12 @@ export function DiscoveryForm() {
 
                       {values.mobileRequirements.selectedReasons.includes("other") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "mobileRequirements.otherExplanation",
+                            "Explain the other native mobile reason",
+                            values.mobileRequirements.otherExplanation,
+                            (draft) => form.setValue("mobileRequirements.otherExplanation", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Explain the other native mobile reason"
                           explanation="State the operating constraint that makes a web experience insufficient."
                           example="Devices are managed under strict MDM kiosk mode, so the team needs controlled camera access, background upload retries, and push alert handling that browser tabs cannot reliably provide."
@@ -1801,6 +1836,12 @@ export function DiscoveryForm() {
 
                       {values.mobileRequirements.selectedReasons.includes("offline") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "mobileRequirements.offlineDetail",
+                            "Describe exact offline requirements",
+                            values.mobileRequirements.offlineDetail,
+                            (draft) => form.setValue("mobileRequirements.offlineDetail", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe EXACT offline requirements"
                           explanation="Must state what actions happen offline and how long users are expected to remain offline."
                           example="Inspectors must create and complete inspections offline, record fail reasons, capture photos, and close urgent work items for up to 8 hours offline before queued sync runs when they reconnect."
@@ -1836,6 +1877,12 @@ export function DiscoveryForm() {
 
                       {values.mobileRequirements.selectedReasons.includes("performance") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "mobileRequirements.performanceDetail",
+                            "Describe specific performance issues expected",
+                            values.mobileRequirements.performanceDetail,
+                            (draft) => form.setValue("mobileRequirements.performanceDetail", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe specific performance issues expected"
                           explanation="Name the slow workflows or device demands expected from the product."
                           example="The app must load 200-checkpoint inspection templates in under 2 seconds, open camera capture in under 1 second, and save findings without UI lag on managed Android and iOS devices."
@@ -1869,6 +1916,12 @@ export function DiscoveryForm() {
                       </FieldShell>
                       {values.offlineRequirements.supportLevel !== "none" ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "offlineRequirements.detail",
+                            "Describe the offline workflows, sync behavior, and expected frequency",
+                            values.offlineRequirements.detail,
+                            (draft) => form.setValue("offlineRequirements.detail", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe the offline workflows, sync behavior, and expected frequency"
                           explanation="State what users do offline, how sync occurs, and how often the app must reconcile data."
                           example="Supervisors and inspectors complete inspections and work items for up to 4 hours offline, then sync every 15 minutes when online, with conflict review routed to managers before final status updates publish."
@@ -2002,6 +2055,17 @@ export function DiscoveryForm() {
                   {currentStep === 6 ? (
                     <>
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "analyticsAi.analyticsPhase1",
+                          "What analytics must exist at launch?",
+                          values.analyticsAi.analyticsPhase1,
+                          (draft) =>
+                            form.setValue(
+                              "analyticsAi.analyticsPhase1",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What analytics must exist at launch?"
                         explanation="List concrete dashboards, metrics, or exports needed in Phase 1."
                         example="Managers need a daily dashboard showing inspection score by site, unresolved work item aging over 48 hours, case volume by type, and coverage rate by shift."
@@ -2011,6 +2075,17 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "analyticsAi.analyticsPhase1")}
                       />
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "analyticsAi.analyticsPhase2",
+                          "What analytics can wait until Phase 2+?",
+                          values.analyticsAi.analyticsPhase2,
+                          (draft) =>
+                            form.setValue(
+                              "analyticsAi.analyticsPhase2",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What analytics can wait until Phase 2+?"
                         explanation="Separate later-stage reporting from launch necessities."
                         example="Executive trend forecasting, manager scorecards across regions, and quarter-over-quarter benchmarking by customer segment can wait until Phase 2."
@@ -2020,6 +2095,17 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "analyticsAi.analyticsPhase2")}
                       />
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "analyticsAi.aiPhase1",
+                          "What AI capabilities are expected in Phase 1?",
+                          values.analyticsAi.aiPhase1,
+                          (draft) =>
+                            form.setValue(
+                              "analyticsAi.aiPhase1",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What AI capabilities are expected in Phase 1?"
                         explanation="Describe concrete outputs only. If none are required in Phase 1, say so explicitly with a scoped reason."
                         example="Phase 1 includes no predictive AI; only optional draft summarization of long incident comments is allowed to reduce typing while approval remains fully human."
@@ -2029,6 +2115,17 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "analyticsAi.aiPhase1")}
                       />
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "analyticsAi.aiPhase2",
+                          "What AI capabilities belong in Phase 2+?",
+                          values.analyticsAi.aiPhase2,
+                          (draft) =>
+                            form.setValue(
+                              "analyticsAi.aiPhase2",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="What AI capabilities belong in Phase 2+?"
                         explanation="List the specific decision support or automation outcomes expected later."
                         example="Phase 2+ should suggest likely root cause categories, recommend next-best actions from historical outcomes, and flag locations likely to miss inspection quality thresholds."
@@ -2039,6 +2136,12 @@ export function DiscoveryForm() {
                       />
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "analyticsAi.locationHealthScoringModel",
+                          "How is location health score calculated?",
+                          values.analyticsAi.locationHealthScoringModel,
+                          (draft) => form.setValue("analyticsAi.locationHealthScoringModel", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="How is location health score calculated?"
                         explanation="Define score components, weighting logic, and what conditions reduce the score."
                         example="Location health starts at 100 and subtracts weighted penalties for overdue work items, missed joint inspections, and unresolved incidents; score changes are published daily with reason tags."
@@ -2048,6 +2151,12 @@ export function DiscoveryForm() {
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "analyticsAi.managementRollupExpectations",
+                          "What rollups do managers, regional leaders, and executives need?",
+                          values.analyticsAi.managementRollupExpectations,
+                          (draft) => form.setValue("analyticsAi.managementRollupExpectations", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What rollups do managers, regional leaders, and executives need?"
                         explanation="Describe who sees which KPI rollups and how often they act on them."
                         example="Site managers need daily exception views, regional leaders need weekly trend rollups by portfolio, and executives need monthly enterprise comparisons with top risk sites highlighted."
@@ -2060,8 +2169,20 @@ export function DiscoveryForm() {
 
                   {currentStep === 7 ? (
                     <>
-                      <WorkflowEditor control={form.control} errors={form.formState.errors} register={form.register} setValue={form.setValue} />
+                      <WorkflowEditor
+                        ai={getQuestionAiProps("workflows.topDailyWorkflows", "Top 3 workflows used daily", values.workflows.topDailyWorkflows)}
+                        control={form.control}
+                        errors={form.formState.errors}
+                        register={form.register}
+                        setValue={form.setValue}
+                      />
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "workflows.workItemUrgencyRules",
+                          "What work item urgency and aging rules apply at launch?",
+                          values.workflows.workItemUrgencyRules,
+                          (draft) => form.setValue("workflows.workItemUrgencyRules", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What work item urgency and aging rules apply at launch?"
                         explanation="Define when work items are required, urgency levels, and overdue thresholds."
                         example="Any room score below 3.0 requires a work item, critical issues are due same day, and items older than 24 hours overdue trigger daily manager escalation."
@@ -2070,6 +2191,12 @@ export function DiscoveryForm() {
                         <Textarea {...form.register("workflows.workItemUrgencyRules")} />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "workflows.assigneeNotificationEscalation",
+                          "How should assignee notifications and overdue escalation behave?",
+                          values.workflows.assigneeNotificationEscalation,
+                          (draft) => form.setValue("workflows.assigneeNotificationEscalation", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="How should assignee notifications and overdue escalation behave?"
                         explanation="Describe who gets notified and when escalation expands beyond the assignee."
                         example="Assignees receive immediate mobile alerts, supervisors get reminders before due time, and unresolved overdue items escalate to regional leaders after 24 hours."
@@ -2078,6 +2205,17 @@ export function DiscoveryForm() {
                         <Textarea {...form.register("workflows.assigneeNotificationEscalation")} />
                       </FieldShell>
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "workflows.caseTypesInScope",
+                          "Which case types must exist at launch?",
+                          values.workflows.caseTypesInScope,
+                          (draft) =>
+                            form.setValue(
+                              "workflows.caseTypesInScope",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="Which case types must exist at launch?"
                         explanation="List all mandatory case categories for operations and departments."
                         example="Incident, near miss, property damage, complaint, compliment, service request, resignation, and help desk."
@@ -2357,6 +2495,17 @@ export function DiscoveryForm() {
                       ))}
 
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "phase2Roadmap.priorityRanking",
+                          "Rank your top Phase 2 priorities",
+                          values.phase2Roadmap.priorityRanking,
+                          (draft) =>
+                            form.setValue(
+                              "phase2Roadmap.priorityRanking",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="Rank your top Phase 2 priorities"
                         explanation="Provide at least top 3 in order (entry 1 = highest priority)."
                         example="1) Work item SLA automation, 2) Training assignments and certification tracking, 3) Team announcements with acknowledgment history."
@@ -2431,6 +2580,12 @@ export function DiscoveryForm() {
 
                       {values.phase3Roadmap.selectedCapabilities.includes("other") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "phase3Roadmap.otherCapability",
+                            "Describe the other Phase 3 capability",
+                            values.phase3Roadmap.otherCapability,
+                            (draft) => form.setValue("phase3Roadmap.otherCapability", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe the other Phase 3 capability"
                           explanation="Name the capability explicitly."
                           example="Customer churn early-warning model by site portfolio"
@@ -2442,6 +2597,20 @@ export function DiscoveryForm() {
 
                       {values.phase3Roadmap.selectedCapabilities.map((capability) => (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            `phase3Roadmap.capabilityDetails.${capability}`,
+                            `Describe exactly what the system should do for ${
+                              capability === "other"
+                                ? values.phase3Roadmap.otherCapability || "Other"
+                                : phase3CapabilityOptions.find((option) => option.value === capability)?.label ?? capability
+                            }`,
+                            values.phase3Roadmap.capabilityDetails[capability],
+                            (draft) =>
+                              form.setValue(`phase3Roadmap.capabilityDetails.${capability}` as Path<DiscoveryValidatedValues>, draft as never, {
+                                shouldDirty: true,
+                                shouldValidate: true
+                              })
+                          )}
                           key={capability}
                           label={`Describe exactly what the system should do for ${
                             capability === "other"
@@ -2476,6 +2645,12 @@ export function DiscoveryForm() {
 
                       {values.phase3Roadmap.dataSources.includes("other") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "phase3Roadmap.otherDataSource",
+                            "Describe the other data source",
+                            values.phase3Roadmap.otherDataSource,
+                            (draft) => form.setValue("phase3Roadmap.otherDataSource", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe the other data source"
                           explanation="Name the source explicitly."
                           example="Customer contract SLA and penalty history dataset"
@@ -2543,6 +2718,17 @@ export function DiscoveryForm() {
                       ) : null}
 
                       <StringListField
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.successMetrics",
+                          "How will you measure success of AI capabilities?",
+                          values.phase3Roadmap.successMetrics,
+                          (draft) =>
+                            form.setValue(
+                              "phase3Roadmap.successMetrics",
+                              draft.split(/\n+/).map((item) => item.replace(/^(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean),
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                        )}
                         label="How will you measure success of AI capabilities?"
                         explanation="Use specific measurable outcomes (for example percentages, thresholds, or SLA improvements)."
                         example="Reduce repeat high-risk findings by 25%, cut overdue work items older than 7 days by 35%, and improve location health score variance by 15% within 6 months."
@@ -2553,6 +2739,12 @@ export function DiscoveryForm() {
                       />
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.aiEnablementPrerequisites",
+                          "What prerequisites must be met before enabling AI capabilities?",
+                          values.phase3Roadmap.aiEnablementPrerequisites,
+                          (draft) => form.setValue("phase3Roadmap.aiEnablementPrerequisites", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What prerequisites must be met before enabling AI capabilities?"
                         explanation="Describe data quality, stability period, and readiness controls required before rollout."
                         example="Require two quarters of stable inspection and work-item data quality, consistent taxonomy usage, and approved model governance checklist before production AI enablement."
@@ -2579,23 +2771,45 @@ export function DiscoveryForm() {
                   </div>
                 ) : null}
 
+                {showNavigationError && (navigationError ?? true) ? (
+                  <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
+                    {navigationError ?? "This section needs a bit more detail before you can move on."}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-6">
-                  <Button onClick={previousStep} type="button" variant="ghost" disabled={currentStep === 0 || isPending || isReviewing}>
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </Button>
-                  <div className="flex items-center gap-3">
-                    <Button onClick={() => void runAiReview()} type="button" variant="secondary" disabled={isPending || isReviewing}>
-                      {isReviewing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                      Review with AI
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      onClick={() => setCurrentQuestionIndex((index) => Math.max(index - 1, 0))}
+                      type="button"
+                      variant="ghost"
+                      disabled={currentQuestionIndex === 0}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous question
                     </Button>
+                    <Button
+                      onClick={() => setCurrentQuestionIndex((index) => Math.min(index + 1, Math.max(questionCount - 1, 0)))}
+                      type="button"
+                      variant="secondary"
+                      disabled={currentQuestionIndex >= questionCount - 1}
+                    >
+                      Next question
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button onClick={previousStep} type="button" variant="ghost" disabled={currentStep === 0 || isPending}>
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous section
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-3">
                     {!isFinalStep ? (
-                      <Button onClick={nextStep} type="button" disabled={isReviewing}>
-                        {isReviewing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+                      <Button onClick={nextStep} type="button">
                         Next section
+                        <ChevronRight className="h-4 w-4" />
                       </Button>
                     ) : (
-                      <Button onClick={submit} type="button" disabled={isPending || isReviewing}>
+                      <Button onClick={submit} type="button" disabled={isPending}>
                         {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                         Generate structured output
                       </Button>
@@ -2604,45 +2818,21 @@ export function DiscoveryForm() {
                 </div>
               </section>
             </CardContent>
-          </Card>
-        </div>
+          )}
+        </Card>
       </div>
 
       <div className="mt-8 flex justify-center">
         <button
           aria-label="Quick QA autofill and submit"
           className="text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]/25 transition hover:text-[var(--muted-foreground)]/70"
-          disabled={isPending || isReviewing}
+          disabled={isPending}
           onClick={quickQaSubmit}
           type="button"
         >
           QA quick submit
         </button>
       </div>
-
-      <AiReviewModal
-        draft={draftSuggestion}
-        draftError={draftError}
-        draftTargetPath={draftTargetPath}
-        draftTargets={draftTargets}
-        isGeneratingDraft={isGeneratingDraft}
-        isLoading={isReviewing}
-        onApplyDraft={() => {
-          void applyAiDraft();
-        }}
-        onClose={() => {
-          closeReviewModal();
-          setPendingReviewAction(null);
-        }}
-        onContinue={continueAfterReview}
-        onDraftChange={setDraftSuggestion}
-        onDraftTargetChange={setDraftTargetPath}
-        onGenerateDraft={() => {
-          void generateAiDraft();
-        }}
-        open={isReviewModalOpen}
-        reviewState={aiReviewBySection[activeSection.id]}
-      />
     </main>
   );
 }

@@ -147,7 +147,6 @@ const bannedPhrases = [
   "not sure",
   "we need all of it",
   "all of it",
-  "standard",
   "things slow down",
   "operations are impacted",
   "smart insights",
@@ -208,7 +207,10 @@ const wordCount = (value: string) =>
 
 const hasBannedPhrase = (value: string) => {
   const normalized = normalizeText(value).toLowerCase();
-  return bannedPhrases.find((phrase) => normalized.includes(phrase));
+  return bannedPhrases.find((phrase) => {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|\\b)${escaped}(\\b|$)`, "i").test(normalized);
+  });
 };
 
 const hasActionVerb = (value: string) => {
@@ -228,7 +230,7 @@ const addSpecificityIssue = (
   }
 ) => {
   const text = normalizeText(value);
-  const minWords = options?.minWords ?? 12;
+  const minWords = options?.minWords ?? 8;
 
   if (!text) {
     ctx.addIssue({
@@ -243,7 +245,7 @@ const addSpecificityIssue = (
     ctx.addIssue({
       code: "custom",
       path,
-      message: `${label} must be at least ${minWords} words and describe who does what.`
+      message: `${label} needs a bit more detail. Add who is involved, what they do, and the outcome.`
     });
   }
 
@@ -260,7 +262,7 @@ const addSpecificityIssue = (
     ctx.addIssue({
       code: "custom",
       path,
-      message: `${label} must include at least one action verb such as create, assign, review, or complete.`
+      message: `${label} should describe an action, such as create, assign, review, or complete.`
     });
   }
 
@@ -534,8 +536,16 @@ export const discoveryFormSchema = z
       });
     }
 
-    [...systemsToday, ...mustReplace, ...canDefer].forEach((item, index) => {
+    systemsToday.forEach((item, index) => {
       addSpecificityIssue(ctx, ["currentBaseline", "systemsToday", index], "Current system entry", item, { minWords: 2 });
+    });
+
+    mustReplace.forEach((item, index) => {
+      addSpecificityIssue(ctx, ["currentBaseline", "mustReplace", index], "Must-replace item", item, { minWords: 2 });
+    });
+
+    canDefer.forEach((item, index) => {
+      addSpecificityIssue(ctx, ["currentBaseline", "canDefer", index], "Deferred item", item, { minWords: 2 });
     });
 
     if (!values.currentBaseline.hierarchyRequirement) {
@@ -1732,9 +1742,11 @@ export const aiReviewRequestSchema = z.object({
   sectionTitle: z.string(),
   objective: z.string(),
   checklist: z.array(z.string()),
+  questionLabel: z.string().optional(),
+  fieldPath: z.string().optional(),
   sectionData: z.unknown(),
   fullSnapshot: z.unknown(),
-  aiProvider: z.enum(["auto", "openai", "zai", "kimi"]).optional()
+  aiProvider: z.enum(["auto", "gemini", "openai", "zai", "kimi"]).optional()
 });
 
 export type AiReviewRequest = z.input<typeof aiReviewRequestSchema>;

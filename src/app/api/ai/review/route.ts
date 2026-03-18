@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { aiReviewRequestSchema, aiReviewResponseSchema } from "../../../../domain/discovery";
 
+const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const ZAI_ENDPOINT = "https://api.z.ai/api/coding/paas/v4/chat/completions";
 const KIMI_ENDPOINT = "https://api.moonshot.ai/v1/chat/completions";
 
+const geminiKey = process.env.GEMINI_API_KEY;
 const openAiKey = process.env.OPENAI_API_KEY ?? process.env.OpenAI_Key;
 const zaiKey = process.env.ZAI_API_KEY ?? process.env.XAI_API_KEY;
 const kimiKey = process.env.KIMI_API_KEY;
 
-type AiProvider = "auto" | "openai" | "zai" | "kimi";
+type AiProvider = "auto" | "gemini" | "openai" | "zai" | "kimi";
 
 type ProviderConfig = {
   provider: Exclude<AiProvider, "auto">;
@@ -20,9 +22,21 @@ type ProviderConfig = {
 };
 
 const getProviderConfig = (provider: AiProvider): ProviderConfig | null => {
+  const geminiModel = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
   const openAiModel = process.env.OPENAI_MODEL ?? process.env.AI_REVIEW_MODEL ?? "gpt-4.1-mini";
   const zaiModel = process.env.ZAI_MODEL ?? process.env.XAI_MODEL ?? "glm-4.7";
   const kimiModel = process.env.KIMI_MODEL ?? "kimi-k2-0711-preview";
+
+  if (provider === "gemini") {
+    return geminiKey
+      ? {
+          provider: "gemini",
+          endpoint: process.env.GEMINI_ENDPOINT ?? GEMINI_ENDPOINT,
+          key: geminiKey,
+          model: geminiModel
+        }
+      : null;
+  }
 
   if (provider === "openai") {
     return openAiKey
@@ -57,7 +71,23 @@ const getProviderConfig = (provider: AiProvider): ProviderConfig | null => {
       : null;
   }
 
-  return getProviderConfig("openai") ?? getProviderConfig("zai") ?? getProviderConfig("kimi");
+  return getProviderConfig("gemini") ?? getProviderConfig("openai") ?? getProviderConfig("zai") ?? getProviderConfig("kimi");
+};
+
+const getAutoFallbackConfig = (provider: Exclude<AiProvider, "auto">): ProviderConfig | null => {
+  if (provider === "gemini") {
+    return getProviderConfig("openai") ?? getProviderConfig("zai") ?? getProviderConfig("kimi");
+  }
+
+  if (provider === "openai") {
+    return getProviderConfig("zai") ?? getProviderConfig("kimi");
+  }
+
+  if (provider === "zai") {
+    return getProviderConfig("kimi");
+  }
+
+  return null;
 };
 
 const isModelAccessError = (errorBody: string) => {
@@ -95,6 +125,10 @@ const buildRequestBody = (payload: ReturnType<typeof aiReviewRequestSchema.parse
               title: payload.sectionTitle,
               objective: payload.objective,
               checklist: payload.checklist
+            },
+            question: {
+              label: payload.questionLabel ?? payload.sectionTitle,
+              fieldPath: payload.fieldPath ?? null
             },
             sectionData: payload.sectionData,
             fullSnapshot: payload.fullSnapshot
@@ -171,7 +205,8 @@ const buildSystemPrompt = () =>
     "If details are missing, set status to needs_clarification and provide focused follow-up questions.",
     "Keep feedback practical and concise so users can fix answers quickly.",
     "Prefer operational specificity: actors, actions, systems, data movement, timing, scale, and business outcomes.",
-    "Use plain business language and avoid heavy jargon, acronyms, or consultant-style wording unless necessary."
+    "Use plain business language and avoid heavy jargon, acronyms, or consultant-style wording unless necessary.",
+    "When a question label is provided, make the feedback explicitly about that question."
   ].join(" ");
 
 const normalizeJsonBlock = (text: string): string => {
@@ -292,7 +327,7 @@ export async function POST(request: Request) {
 
     if (!primaryConfig) {
       return NextResponse.json(
-        { error: "No AI key configured for selected provider. Check OPENAI_API_KEY, ZAI_API_KEY, or KIMI_API_KEY." },
+        { error: "No AI key configured for selected provider. Check GEMINI_API_KEY, OPENAI_API_KEY, ZAI_API_KEY, or KIMI_API_KEY." },
         { status: 503 }
       );
     }
@@ -308,8 +343,7 @@ export async function POST(request: Request) {
     }
 
     if (!response) {
-      const canAutoFallback = (selectedProvider === "auto" || selectedProvider === "openai") && primaryConfig.provider === "openai";
-      const fallbackConfig = canAutoFallback ? getProviderConfig("zai") ?? getProviderConfig("kimi") : null;
+      const fallbackConfig = selectedProvider === "auto" ? getAutoFallbackConfig(primaryConfig.provider) : null;
 
       if (!fallbackConfig) {
         return NextResponse.json(buildLocalFallbackReview(payload));
@@ -336,15 +370,12 @@ export async function POST(request: Request) {
         }
       }
 
-      const canAutoFallback = selectedProvider === "auto" || selectedProvider === "openai";
-      const shouldFallback =
-        canAutoFallback &&
-        primaryConfig.provider === "openai" &&
-        errorBody.toLowerCase().includes("insufficient_quota") &&
-        (!!zaiKey || !!kimiKey);
+      const isQuotaOrRateLimitError =
+        errorBody.toLowerCase().includes("insufficient_quota") || errorBody.toLowerCase().includes("rate limit");
+      const shouldFallback = selectedProvider === "auto" && isQuotaOrRateLimitError;
 
       if (shouldFallback) {
-        const fallbackConfig = getProviderConfig("zai") ?? getProviderConfig("kimi");
+        const fallbackConfig = getAutoFallbackConfig(primaryConfig.provider);
 
         if (!fallbackConfig) {
           return NextResponse.json({ error: "AI review request failed.", detail: errorBody }, { status: 502 });
