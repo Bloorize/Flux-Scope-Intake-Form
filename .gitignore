@@ -1,0 +1,9 @@
+node_modules
+.next
+dist
+coverage
+.env*
+.vercel
+
+# clerk configuration (can include secrets)
+/.clerk/
