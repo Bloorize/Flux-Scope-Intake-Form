@@ -1529,6 +1529,26 @@ export function DiscoveryForm() {
                             />
                           ))}
                         </div>
+                        {values.phase1Scope.selectedFeatures.length > 0 ? (
+                          <div className="space-y-4 pt-2">
+                            {values.phase1Scope.selectedFeatures.map((feature) => (
+                              <div className="space-y-2" key={`inline-feature-detail-${feature}`}>
+                                <label className="block text-sm font-medium text-[var(--foreground)]">
+                                  Day 1 detail: {phase1FeatureOptions.find((option) => option.value === feature)?.label ?? feature}
+                                </label>
+                                <Textarea
+                                  {...form.register(`phase1Scope.featureDetails.${feature}`)}
+                                  placeholder="Describe concrete user actions, required evidence, and expected outcome at launch."
+                                />
+                                {getErrorMessage(form.formState.errors, `phase1Scope.featureDetails.${feature}`) ? (
+                                  <p className="text-sm text-[var(--danger)]">
+                                    {getErrorMessage(form.formState.errors, `phase1Scope.featureDetails.${feature}`)}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </FieldShell>
 
                       {values.phase1Scope.selectedFeatures.includes("other") ? (
@@ -1547,30 +1567,6 @@ export function DiscoveryForm() {
                           <Input {...form.register("phase1Scope.otherFeature")} placeholder="Example: Permit approvals with escalation routing" />
                         </FieldShell>
                       ) : null}
-
-                      {values.phase1Scope.selectedFeatures.map((feature) => (
-                        <FieldShell
-                          ai={getQuestionAiProps(
-                            `phase1Scope.featureDetails.${feature}`,
-                            `Describe exactly what must work for ${phase1FeatureOptions.find((option) => option.value === feature)?.label ?? feature} on Day 1`,
-                            values.phase1Scope.featureDetails[feature],
-                            (draft) =>
-                              form.setValue(`phase1Scope.featureDetails.${feature}` as Path<DiscoveryValidatedValues>, draft as never, {
-                                shouldDirty: true,
-                                shouldValidate: true
-                              })
-                          )}
-                          key={feature}
-                          label={`Describe exactly what must work for ${
-                            phase1FeatureOptions.find((option) => option.value === feature)?.label ?? feature
-                          } on Day 1`}
-                          explanation="Minimum 15 words. Include concrete user actions and business outcomes."
-                          example="Supervisors create daily inspections by site and floor, inspectors submit pass/fail and above-and-beyond ratings with photos, and managers review score rollups to assign follow-up work items before shift end."
-                          error={getErrorMessage(form.formState.errors, `phase1Scope.featureDetails.${feature}`)}
-                        >
-                          <Textarea {...form.register(`phase1Scope.featureDetails.${feature}`)} />
-                        </FieldShell>
-                      ))}
 
                       <FieldShell
                         label="How should inspection scoring work at launch?"
