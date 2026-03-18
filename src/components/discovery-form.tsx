@@ -352,7 +352,9 @@ function FieldShell({
         {questionNumber ? (
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">Question {String(questionNumber).padStart(2, "0")}</div>
         ) : null}
-        <label className="block text-xl font-semibold leading-tight text-[var(--foreground)] md:text-2xl">{label}</label>
+        <label className="block text-xl font-semibold leading-tight text-[var(--foreground)] md:text-2xl" data-question-label="true">
+          {label}
+        </label>
         <p className="text-sm leading-6 text-[var(--muted-foreground)]">{explanation}</p>
         {example ? (
           <details className="rounded-md border border-dashed border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--muted-foreground)]">
@@ -866,6 +868,7 @@ export function DiscoveryForm() {
   const [currentStep, setCurrentStep] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questionCount, setQuestionCount] = useState(0);
+  const [questionTitles, setQuestionTitles] = useState<string[]>([]);
   const [submission, setSubmission] = useState<SubmissionState | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const [showNavigationError, setShowNavigationError] = useState(false);
@@ -1049,6 +1052,10 @@ export function DiscoveryForm() {
     }
   };
   const progress = useMemo(() => ((currentStep + 1) / discoverySections.length) * 100, [currentStep]);
+  const sectionQuestionProgress = useMemo(
+    () => (questionCount > 0 ? ((Math.min(currentQuestionIndex, questionCount - 1) + 1) / questionCount) * 100 : 0),
+    [currentQuestionIndex, questionCount]
+  );
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
 
@@ -1108,6 +1115,13 @@ export function DiscoveryForm() {
 
     const questions = Array.from(section.querySelectorAll<HTMLElement>("[data-question-shell='true']"));
     setQuestionCount(questions.length);
+    setQuestionTitles(
+      questions.map((question, index) => {
+        const heading = question.querySelector<HTMLElement>("[data-question-label='true']");
+        const text = heading?.textContent?.trim();
+        return text && text.length > 0 ? text : `Question ${index + 1}`;
+      })
+    );
 
     const nextIndex = questions.length === 0 ? 0 : Math.min(currentQuestionIndex, questions.length - 1);
     if (nextIndex !== currentQuestionIndex) {
@@ -1504,9 +1518,40 @@ export function DiscoveryForm() {
                     <h2 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">{activeSection.prompt}</h2>
                     <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">{activeSection.description}</p>
                   </div>
-                  <div className="rounded-2xl bg-[var(--muted)] px-4 py-3 text-sm text-[var(--foreground)]">
-                    <span className="font-semibold">Question {Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))}</span>
-                    <span className="text-[var(--muted-foreground)]"> of {Math.max(questionCount, 1)} in this section</span>
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] px-4 py-4 text-sm text-[var(--foreground)]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold">
+                        Section {currentStep + 1} of {discoverySections.length}: {activeSection.shortTitle}
+                      </span>
+                      <span className="text-[var(--muted-foreground)]">
+                        Step {Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of {Math.max(questionCount, 1)}
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <Progress value={sectionQuestionProgress} />
+                      <p className="text-xs leading-5 text-[var(--muted-foreground)]">
+                        You are moving through one question at a time within this section.
+                      </p>
+                    </div>
+                    {questionTitles.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {questionTitles.map((title, index) => (
+                          <button
+                            key={`${activeSection.id}-question-title-${index}`}
+                            type="button"
+                            onClick={() => setCurrentQuestionIndex(index)}
+                            className={cn(
+                              "max-w-full rounded-full border px-3 py-1 text-xs transition-colors",
+                              index === currentQuestionIndex
+                                ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                                : "border-[var(--border)] bg-white text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
+                            )}
+                          >
+                            {index + 1}. {title}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -2757,43 +2802,54 @@ export function DiscoveryForm() {
                   </div>
                 ) : null}
 
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-6">
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      onClick={() => setCurrentQuestionIndex((index) => Math.max(index - 1, 0))}
-                      type="button"
-                      variant="ghost"
-                      disabled={currentQuestionIndex === 0}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Previous question
-                    </Button>
-                    <Button
-                      onClick={() => setCurrentQuestionIndex((index) => Math.min(index + 1, Math.max(questionCount - 1, 0)))}
-                      type="button"
-                      variant="secondary"
-                      disabled={currentQuestionIndex >= questionCount - 1}
-                    >
-                      Next question
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button onClick={previousStep} type="button" variant="ghost" disabled={currentStep === 0 || isPending}>
-                      <ChevronLeft className="h-4 w-4" />
-                      Previous section
-                    </Button>
+                <div className="space-y-4 border-t border-[var(--border)] pt-6">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Question navigation</p>
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          onClick={() => setCurrentQuestionIndex((index) => Math.max(index - 1, 0))}
+                          type="button"
+                          variant="ghost"
+                          disabled={currentQuestionIndex === 0}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          Previous question
+                        </Button>
+                        <Button
+                          onClick={() => setCurrentQuestionIndex((index) => Math.min(index + 1, Math.max(questionCount - 1, 0)))}
+                          type="button"
+                          variant="secondary"
+                          disabled={currentQuestionIndex >= questionCount - 1}
+                        >
+                          Next question
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Section navigation</p>
+                      <div className="flex flex-wrap gap-3">
+                        <Button onClick={previousStep} type="button" variant="ghost" disabled={currentStep === 0 || isPending}>
+                          <ChevronLeft className="h-4 w-4" />
+                          Previous section
+                        </Button>
+                        {!isFinalStep ? (
+                          <Button onClick={nextStep} type="button">
+                            Continue to next section
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button onClick={submit} type="button" disabled={isPending}>
+                            {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                            Generate structured output
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {!isFinalStep ? (
-                      <Button onClick={nextStep} type="button">
-                        Next section
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <Button onClick={submit} type="button" disabled={isPending}>
-                        {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                        Generate structured output
-                      </Button>
-                    )}
+                  <div className="text-xs text-[var(--muted-foreground)]">
+                    Finish all steps in this section, then use section navigation to move forward.
                   </div>
                 </div>
               </section>
