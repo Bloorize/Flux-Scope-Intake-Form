@@ -21,6 +21,8 @@ type SavedSubmissionRow = {
   };
 };
 
+type ResponseScope = "all" | "mine";
+
 type QaPair = {
   section: string;
   question: string;
@@ -246,14 +248,15 @@ export default function ResponsesPage() {
   const [isLoadingSavedSubmissions, setIsLoadingSavedSubmissions] = useState(false);
   const [savedSubmissionsError, setSavedSubmissionsError] = useState<string | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [responseScope, setResponseScope] = useState<ResponseScope>("all");
   const [copied, setCopied] = useState(false);
 
-  const loadSavedSubmissions = async () => {
+  const loadSavedSubmissions = async (requestedScope: ResponseScope = responseScope) => {
     setSavedSubmissionsError(null);
     setIsLoadingSavedSubmissions(true);
 
     try {
-      const response = await fetch("/api/submissions?limit=100");
+      const response = await fetch(`/api/submissions?limit=100&scope=${requestedScope}`);
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string; detail?: string } | null;
         const message = payload?.error ?? "Failed to load saved submissions.";
@@ -261,13 +264,17 @@ export default function ResponsesPage() {
         return;
       }
 
-      const payload = (await response.json()) as { submissions?: SavedSubmissionRow[]; isSuperAdmin?: boolean };
+      const payload = (await response.json()) as { submissions?: SavedSubmissionRow[]; isSuperAdmin?: boolean; scope?: ResponseScope };
       const nextSubmissions = payload.submissions ?? [];
       setSavedSubmissions(nextSubmissions);
       setIsSuperAdmin(Boolean(payload.isSuperAdmin));
-      if (nextSubmissions.length > 0) {
-        setSelectedSavedSubmissionId((current) => current ?? nextSubmissions[0].id);
-      }
+      setResponseScope(payload.scope ?? "mine");
+      setSelectedSavedSubmissionId((current) => {
+        if (!current) {
+          return nextSubmissions[0]?.id ?? null;
+        }
+        return nextSubmissions.some((item) => item.id === current) ? current : (nextSubmissions[0]?.id ?? null);
+      });
     } catch {
       setSavedSubmissionsError("Failed to load saved submissions.");
     } finally {
@@ -326,10 +333,29 @@ export default function ResponsesPage() {
           <div className="mx-auto max-w-7xl space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <Badge>{isSuperAdmin ? "All responses (super admin)" : "My responses"}</Badge>
+                <Badge>
+                  {isSuperAdmin ? (responseScope === "all" ? "All responses (super admin)" : "My responses (super admin)") : "My responses"}
+                </Badge>
+                {isSuperAdmin ? (
+                  <div className="mt-3 flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
+                    <span>View:</span>
+                    <select
+                      className="h-9 rounded-md border border-[var(--border)] bg-white px-2 text-sm text-[var(--foreground)]"
+                      onChange={(event) => {
+                        const nextScope = event.target.value as ResponseScope;
+                        setResponseScope(nextScope);
+                        void loadSavedSubmissions(nextScope);
+                      }}
+                      value={responseScope}
+                    >
+                      <option value="all">All responses</option>
+                      <option value="mine">My responses</option>
+                    </select>
+                  </div>
+                ) : null}
                 <h1 className="mt-3 text-4xl font-semibold tracking-tight text-[var(--foreground)]">Responses output panel</h1>
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
-                  {isSuperAdmin
+                  {isSuperAdmin && responseScope === "all"
                     ? "Review all submissions saved to Supabase and inspect full structured output."
                     : "Review your submissions saved to Supabase and inspect full structured output."}
                 </p>

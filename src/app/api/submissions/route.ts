@@ -22,10 +22,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const parsedLimit = Number(searchParams.get("limit") ?? "25");
   const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 25;
+  const requestedScope = searchParams.get("scope");
+  const shouldReturnAll = isSuperAdmin && requestedScope === "all";
 
   let query = supabase.from("form_submissions").select("id, created_at, summary, loe, structured");
 
-  if (!isSuperAdmin) {
+  if (!shouldReturnAll) {
     query = query.eq("user_id", userId);
   }
 
@@ -35,5 +37,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Failed to fetch submissions from Supabase.", detail: error.message }, { status: 502 });
   }
 
-  return NextResponse.json({ submissions: data ?? [], isSuperAdmin });
+  return NextResponse.json({ submissions: data ?? [], isSuperAdmin, scope: shouldReturnAll ? "all" : "mine" });
 }

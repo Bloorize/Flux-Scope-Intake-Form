@@ -46,8 +46,10 @@ import { Input } from "./ui/input";
 import { Progress } from "./ui/progress";
 import { Textarea } from "./ui/textarea";
 
+type StructuredSubmission = ReturnType<typeof buildStructuredOutput> & { question_notes?: Record<string, string> };
+
 type SubmissionState = {
-  structured: ReturnType<typeof buildStructuredOutput>;
+  structured: StructuredSubmission;
   summary: ReturnType<typeof buildReadableSummary>;
   loe: ReturnType<typeof classifyLoe>;
   response: { status: string; receivedAt: string; id: string };
@@ -72,6 +74,8 @@ type ValidationIssue = {
   message: string;
   isSuggestion: boolean;
 };
+
+type QuestionNotesState = Record<string, string>;
 
 const DISCOVERY_DRAFT_STORAGE_KEY = "discovery-form-draft-v1";
 
@@ -630,6 +634,20 @@ function RadioStack({
   );
 }
 
+function ChoiceContextNote({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  return (
+    <div className="space-y-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--muted)]/40 p-3">
+      <label className="block text-sm font-medium text-[var(--foreground)]">Additional context (optional)</label>
+      <Textarea
+        rows={3}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Add rationale, caveats, or implementation context for this selection."
+      />
+    </div>
+  );
+}
+
 function WorkflowEditor({
   questionNumber,
   control,
@@ -940,6 +958,7 @@ export function DiscoveryForm() {
   const [showSubmitWarningDialog, setShowSubmitWarningDialog] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
+  const [questionNotes, setQuestionNotes] = useState<QuestionNotesState>({});
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
   const hasHydratedDraftRef = useRef(false);
@@ -1123,6 +1142,7 @@ export function DiscoveryForm() {
   const hasNextQuestionInSection = currentQuestionIndex < Math.max(questionCount - 1, 0);
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
+  const canRetreat = currentStep > 0 || currentQuestionIndex > 0;
   const entryStageOrder: Array<"welcome" | "scope-summary" | "blind-spots" | "questions"> = [
     "welcome",
     "scope-summary",
@@ -1192,6 +1212,7 @@ export function DiscoveryForm() {
     try {
       const parsed = JSON.parse(raw) as {
         values?: unknown;
+        questionNotes?: unknown;
         entryStage?: unknown;
         currentStep?: unknown;
         currentQuestionIndex?: unknown;
@@ -1200,6 +1221,16 @@ export function DiscoveryForm() {
       if (parsed.values !== undefined) {
         const restoredValues = mergeWithDefaults(defaultDiscoveryValues, parsed.values);
         form.reset(restoredValues);
+      }
+
+      if (parsed.questionNotes && typeof parsed.questionNotes === "object" && !Array.isArray(parsed.questionNotes)) {
+        const restoredNotes = Object.entries(parsed.questionNotes as Record<string, unknown>).reduce<QuestionNotesState>((accumulator, [key, value]) => {
+          if (typeof value === "string") {
+            accumulator[key] = value;
+          }
+          return accumulator;
+        }, {});
+        setQuestionNotes(restoredNotes);
       }
 
       if (
@@ -1236,6 +1267,7 @@ export function DiscoveryForm() {
 
     const draft = {
       values,
+      questionNotes,
       entryStage,
       currentStep,
       currentQuestionIndex
@@ -1246,7 +1278,7 @@ export function DiscoveryForm() {
     } catch {
       // Ignore quota/storage errors and keep the form usable.
     }
-  }, [values, entryStage, currentStep, currentQuestionIndex, submission]);
+  }, [values, questionNotes, entryStage, currentStep, currentQuestionIndex, submission]);
 
   useEffect(() => {
     const section = questionSectionRef.current;
@@ -1430,13 +1462,44 @@ export function DiscoveryForm() {
     }
   });
 
+  const getQuestionNote = (fieldPath: string) => questionNotes[fieldPath] ?? "";
+  const setQuestionNote = (fieldPath: string, nextValue: string) => {
+    setQuestionNotes((current) => {
+      const trimmed = nextValue.trim();
+      if (!trimmed) {
+        if (!(fieldPath in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[fieldPath];
+        return next;
+      }
+      if (current[fieldPath] === nextValue) {
+        return current;
+      }
+      return {
+        ...current,
+        [fieldPath]: nextValue
+      };
+    });
+  };
+
   const performSubmission = (rawValues: DiscoveryValidatedValues, options?: { bypassValidation?: boolean }) => {
     setApiError(null);
     startTransition(async () => {
       const validatedValues = options?.bypassValidation
         ? rawValues
         : (discoveryFormSchema.parse(rawValues) as DiscoveryValidatedValues);
-      const structured = buildStructuredOutput(validatedValues);
+      const baseStructured = buildStructuredOutput(validatedValues);
+      const cleanedNotes = Object.entries(questionNotes).reduce<Record<string, string>>((accumulator, [fieldPath, note]) => {
+        const trimmed = note.trim();
+        if (trimmed) {
+          accumulator[fieldPath] = trimmed;
+        }
+        return accumulator;
+      }, {});
+      const structured: StructuredSubmission =
+        Object.keys(cleanedNotes).length > 0 ? { ...baseStructured, question_notes: cleanedNotes } : baseStructured;
       const summary = buildReadableSummary(validatedValues);
       const loe = classifyLoe(validatedValues);
 
@@ -1474,6 +1537,19 @@ export function DiscoveryForm() {
   const nextStep = async () => {
     setCurrentQuestionIndex(0);
     setCurrentStep((step) => Math.min(step + 1, discoverySections.length - 1));
+  };
+
+  const retreatFlow = () => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+
+    if (currentStep > 0) {
+      const previousStep = currentStep - 1;
+      setCurrentStep(previousStep);
+      setCurrentQuestionIndex(Number.MAX_SAFE_INTEGER);
+    }
   };
 
   const advanceFlow = async () => {
@@ -1516,6 +1592,7 @@ export function DiscoveryForm() {
     setApiError(null);
     setShowSubmitWarningDialog(false);
     setSubmissionWarnings([]);
+    setQuestionNotes({});
     form.reset(dummyValues);
     setCurrentStep(discoverySections.length - 1);
     performSubmission(dummyValues);
@@ -1640,11 +1717,23 @@ export function DiscoveryForm() {
 
                 {entryStage === "scope-summary" ? (
                   <>
-                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">AI-generated scope summary</h2>
-                    <div className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
-                      <p>- Current direction favors a phased rollout: launch-critical operations first, then roadmap expansion.</p>
-                      <p>- Most value is expected from inspection workflows, corrective action tracking, integrations, and mobile execution clarity.</p>
-                      <p>- AI capabilities should be sequenced behind stable operational data and governance ownership.</p>
+                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">Current Understanding of Scope</h2>
+                    <div className="space-y-3 text-sm leading-6 text-[var(--foreground)]">
+                      <p>
+                        Ruxton Labs already understands this program as an operations-critical modernization effort for the HeySage Intelligent Operations Platform.
+                        Phase 1 must protect day-to-day execution by delivering dependable inspection workflows, corrective work item routing, and dashboard visibility for
+                        frontline supervisors, regional operators, and executive stakeholders.
+                      </p>
+                      <p>
+                        We also see clear complexity signals: native mobile expectations, offline usage windows, role-aware organizational hierarchy requirements,
+                        and launch integrations (especially ADP, Power BI, and internal systems) that require explicit data contracts and latency rules before delivery
+                        planning can be trusted.
+                      </p>
+                      <p>
+                        The phased roadmap is directionally sound. Phase 2 should expand operational modules once Phase 1 adoption is stable, while Phase 3 AI capabilities
+                        should be gated by data readiness, governance ownership, and measurable success criteria. This questionnaire is focused on converting that direction
+                        into concrete implementation decisions, not re-discovering first principles.
+                      </p>
                     </div>
                   </>
                 ) : null}
@@ -1652,10 +1741,19 @@ export function DiscoveryForm() {
                 {entryStage === "blind-spots" ? (
                   <>
                     <h2 className="text-2xl font-semibold text-[var(--foreground)]">Blind spot analysis</h2>
-                    <div className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
-                      <p>- Day 1 boundaries are often too broad and create delivery risk.</p>
-                      <p>- Offline and mobile assumptions may be underspecified for field users.</p>
-                      <p>- Integration depth and latency expectations are frequently unclear at kickoff.</p>
+                    <div className="space-y-3 text-sm leading-6 text-[var(--foreground)]">
+                      <p>
+                        1) Day 1 boundaries often expand late when stakeholders describe \"must-have\" outcomes without actor-level workflows. We will pressure-test every
+                        selected launch feature to prevent Phase 2/3 scope from bleeding into Phase 1.
+                      </p>
+                      <p>
+                        2) Mobile and offline expectations can be underspecified. We need explicit offline duration, sync cadence, conflict handling ownership, and
+                        platform-distribution constraints so architecture and QA planning are realistic.
+                      </p>
+                      <p>
+                        3) Integration complexity is commonly hidden in the details. For each launch system, we need depth, data direction, latency tolerance, and
+                        operational fallback behavior to size delivery risk accurately.
+                      </p>
                     </div>
                   </>
                 ) : null}
@@ -1687,6 +1785,11 @@ export function DiscoveryForm() {
                   {currentStep === 0 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase1Scope.selectedFeatures",
+                          "What exact features must exist on Day 1 for operations to function?",
+                          values.phase1Scope.selectedFeatures
+                        )}
                         label="What exact features must exist on Day 1 for operations to function?"
                         explanation="Select only the capabilities that must be live on launch day. Each selected feature requires a detailed Day 1 behavior statement."
                         example="Day 1 must include inspections, work items, cases, and dashboards so supervisors can run shift checks, managers can assign corrective actions, and leaders can view location health before close of business."
@@ -1722,6 +1825,10 @@ export function DiscoveryForm() {
                             ))}
                           </div>
                         ) : null}
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase1Scope.selectedFeatures")}
+                          onChange={(nextValue) => setQuestionNote("phase1Scope.selectedFeatures", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.phase1Scope.selectedFeatures.includes("other") ? (
@@ -1742,6 +1849,11 @@ export function DiscoveryForm() {
                       ) : null}
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase1Scope.inspectionScoringMethod",
+                          "How should inspection scoring work at launch?",
+                          values.phase1Scope.inspectionScoringMethod
+                        )}
                         label="How should inspection scoring work at launch?"
                         explanation="Choose whether room scores are manager-entered, auto-calculated, or hybrid."
                         example="Hybrid. The system calculates suggested score ranges from pass/fail evidence, and supervisors can override with rubric justification when customer nuance requires it."
@@ -1757,6 +1869,10 @@ export function DiscoveryForm() {
                           }
                           options={inspectionScoringMethodOptions}
                           selected={values.phase1Scope.inspectionScoringMethod}
+                        />
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase1Scope.inspectionScoringMethod")}
+                          onChange={(nextValue) => setQuestionNote("phase1Scope.inspectionScoringMethod", nextValue)}
                         />
                       </FieldShell>
 
@@ -1890,6 +2006,11 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "currentBaseline.canDefer")}
                       />
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "currentBaseline.mirrorApproach",
+                          "Current app strategy",
+                          values.currentBaseline.mirrorApproach
+                        )}
                         label="Current app strategy"
                         explanation="Choose whether Phase 1 should mirror the current app or intentionally diverge."
                         example="Modernize: keep the same frontline inspection flow and score logic for adoption, but redesign manager dashboards and case routing so accountability is clearer and faster."
@@ -1906,9 +2027,18 @@ export function DiscoveryForm() {
                           options={mirrorApproachOptions}
                           selected={values.currentBaseline.mirrorApproach}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("currentBaseline.mirrorApproach")}
+                          onChange={(nextValue) => setQuestionNote("currentBaseline.mirrorApproach", nextValue)}
+                        />
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "currentBaseline.hierarchyRequirement",
+                          "Is the Org -> Region -> Site -> Building -> Floor -> Space hierarchy mandatory at launch?",
+                          values.currentBaseline.hierarchyRequirement
+                        )}
                         label="Is the Org -> Region -> Site -> Building -> Floor -> Space hierarchy mandatory at launch?"
                         explanation="Choose whether this hierarchy must be fully enforced in Phase 1."
                         example="Required at launch because inspections, work items, and dashboard rollups all depend on accurate site-to-space context."
@@ -1925,9 +2055,18 @@ export function DiscoveryForm() {
                           options={hierarchyRequirementOptions}
                           selected={values.currentBaseline.hierarchyRequirement}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("currentBaseline.hierarchyRequirement")}
+                          onChange={(nextValue) => setQuestionNote("currentBaseline.hierarchyRequirement", nextValue)}
+                        />
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "currentBaseline.spaceTypeGovernance",
+                          "How should space types and inspection points be governed?",
+                          values.currentBaseline.spaceTypeGovernance
+                        )}
                         label="How should space types and inspection points be governed?"
                         explanation="Select whether definitions are global, site-managed, or a hybrid with controlled overrides."
                         example="Hybrid governance with global standards for core space types and site-level overrides for customer-specific rooms like labs, courts, or clinical spaces."
@@ -1944,6 +2083,10 @@ export function DiscoveryForm() {
                           options={spaceTypeGovernanceOptions}
                           selected={values.currentBaseline.spaceTypeGovernance}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("currentBaseline.spaceTypeGovernance")}
+                          onChange={(nextValue) => setQuestionNote("currentBaseline.spaceTypeGovernance", nextValue)}
+                        />
                       </FieldShell>
                     </>
                   ) : null}
@@ -1951,6 +2094,11 @@ export function DiscoveryForm() {
                   {currentStep === 3 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "mobileRequirements.selectedReasons",
+                          "Why do you believe native mobile apps are required?",
+                          values.mobileRequirements.selectedReasons
+                        )}
                         label="Why do you believe native mobile apps are required?"
                         explanation="Select the operational reasons that justify native app complexity."
                         example="Inspectors work in low-connectivity mechanical rooms, must capture photos and scores quickly with minimal typing, and need near-instant task switching between inspections and corrective work items during active shifts."
@@ -1968,6 +2116,10 @@ export function DiscoveryForm() {
                             />
                           ))}
                         </div>
+                        <ChoiceContextNote
+                          value={getQuestionNote("mobileRequirements.selectedReasons")}
+                          onChange={(nextValue) => setQuestionNote("mobileRequirements.selectedReasons", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.mobileRequirements.selectedReasons.includes("other") ? (
@@ -2006,6 +2158,11 @@ export function DiscoveryForm() {
 
                       {values.mobileRequirements.selectedReasons.includes("appStore") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "mobileRequirements.appStoreInternalDistributionOk",
+                            "Is TestFlight or internal distribution acceptable?",
+                            values.mobileRequirements.appStoreInternalDistributionOk
+                          )}
                           label="Is TestFlight or internal distribution acceptable?"
                           explanation="Choose yes only if App Store review is not a hard requirement."
                           example="No. Public App Store distribution is required because customer-side stakeholders download the app directly and cannot use internal enterprise distribution channels."
@@ -2024,6 +2181,10 @@ export function DiscoveryForm() {
                               { value: "no", label: "No, public App Store distribution is required" }
                             ]}
                             selected={values.mobileRequirements.appStoreInternalDistributionOk}
+                          />
+                          <ChoiceContextNote
+                            value={getQuestionNote("mobileRequirements.appStoreInternalDistributionOk")}
+                            onChange={(nextValue) => setQuestionNote("mobileRequirements.appStoreInternalDistributionOk", nextValue)}
                           />
                         </FieldShell>
                       ) : null}
@@ -2050,6 +2211,11 @@ export function DiscoveryForm() {
                   {currentStep === 4 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "offlineRequirements.supportLevel",
+                          "Does the platform need to function without internet?",
+                          values.offlineRequirements.supportLevel
+                        )}
                         label="Does the platform need to function without internet?"
                         explanation="Choose the minimum level of offline support required for operations."
                         example="Limited functionality: field teams must continue inspections and photo capture during short outages, then sync queued updates when connectivity is restored at the site."
@@ -2065,6 +2231,10 @@ export function DiscoveryForm() {
                           }
                           options={offlineSupportOptions}
                           selected={values.offlineRequirements.supportLevel}
+                        />
+                        <ChoiceContextNote
+                          value={getQuestionNote("offlineRequirements.supportLevel")}
+                          onChange={(nextValue) => setQuestionNote("offlineRequirements.supportLevel", nextValue)}
                         />
                       </FieldShell>
                       {values.offlineRequirements.supportLevel !== "none" ? (
@@ -2089,6 +2259,11 @@ export function DiscoveryForm() {
                   {currentStep === 5 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "integrations.selectedSystems",
+                          "What systems must integrate at launch?",
+                          values.integrations.selectedSystems
+                        )}
                         label="What systems must integrate at launch?"
                         explanation="Select only the integrations required for launch."
                         example="ADP for employee and role sync is required at launch, and internal location master data is required so every inspection maps correctly to site, building, floor, and space."
@@ -2104,10 +2279,20 @@ export function DiscoveryForm() {
                             />
                           ))}
                         </div>
+                        <ChoiceContextNote
+                          value={getQuestionNote("integrations.selectedSystems")}
+                          onChange={(nextValue) => setQuestionNote("integrations.selectedSystems", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.integrations.selectedSystems.includes("other") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "integrations.otherSystem",
+                            "Name the other launch integration",
+                            values.integrations.otherSystem,
+                            (draft) => form.setValue("integrations.otherSystem", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Name the other launch integration"
                           explanation="Use the system name, not a generic category."
                           example="Salesforce Service Cloud case feed"
@@ -2157,6 +2342,11 @@ export function DiscoveryForm() {
                       ))}
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "integrations.adpSyncMode",
+                          "How should ADP employee data sync into this platform?",
+                          values.integrations.adpSyncMode
+                        )}
                         label="How should ADP employee data sync into this platform?"
                         explanation="Select sync mode and then define acceptable latency for role/site updates."
                         example="Nightly batch sync is acceptable for roster updates, but role changes must be corrected within two hours for shift assignment accuracy."
@@ -2173,9 +2363,19 @@ export function DiscoveryForm() {
                           options={adpSyncModeOptions}
                           selected={values.integrations.adpSyncMode}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("integrations.adpSyncMode")}
+                          onChange={(nextValue) => setQuestionNote("integrations.adpSyncMode", nextValue)}
+                        />
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "integrations.adpLatencyTolerance",
+                          "What ADP sync latency is acceptable operationally?",
+                          values.integrations.adpLatencyTolerance,
+                          (draft) => form.setValue("integrations.adpLatencyTolerance", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What ADP sync latency is acceptable operationally?"
                         explanation="Describe tolerance for stale employee data and when manual correction is required."
                         example="Roster data can lag up to 24 hours, but site transfers and terminations must be reflected the same day to prevent assignment and access errors."
@@ -2185,6 +2385,11 @@ export function DiscoveryForm() {
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "integrations.powerBiMode",
+                          "How will Power BI be used in Phase 1?",
+                          values.integrations.powerBiMode
+                        )}
                         label="How will Power BI be used in Phase 1?"
                         explanation="Choose whether Power BI is view-only, data-sync integrated, or both."
                         example="Both: leadership uses read-only Power BI dashboards while a governed data sync publishes curated inspection and work-item metrics nightly."
@@ -2200,6 +2405,10 @@ export function DiscoveryForm() {
                           }
                           options={powerBiModeOptions}
                           selected={values.integrations.powerBiMode}
+                        />
+                        <ChoiceContextNote
+                          value={getQuestionNote("integrations.powerBiMode")}
+                          onChange={(nextValue) => setQuestionNote("integrations.powerBiMode", nextValue)}
                         />
                       </FieldShell>
                     </>
@@ -2378,6 +2587,12 @@ export function DiscoveryForm() {
                         error={getErrorMessage(form.formState.errors, "workflows.caseTypesInScope")}
                       />
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "workflows.caseRoutingModel",
+                          "How should cases route between location and department ownership?",
+                          values.workflows.caseRoutingModel,
+                          (draft) => form.setValue("workflows.caseRoutingModel", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="How should cases route between location and department ownership?"
                         explanation="Define routing rules for location-owned cases versus centralized department cases."
                         example="Customer-facing complaints route to location owners, while safety and HR cases route to departments with centralized closeout controls and audit trail visibility."
@@ -2386,6 +2601,12 @@ export function DiscoveryForm() {
                         <Textarea {...form.register("workflows.caseRoutingModel")} />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "workflows.publicSafetyPortalScope",
+                          "What must the no-login public safety portal include?",
+                          values.workflows.publicSafetyPortalScope,
+                          (draft) => form.setValue("workflows.publicSafetyPortalScope", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What must the no-login public safety portal include?"
                         explanation="Specify required resources and forms available without authentication."
                         example="No-login portal includes SDS sheets in multiple languages, insurance resources, incident response guidance, and QR-driven incident intake submission."
@@ -2394,6 +2615,12 @@ export function DiscoveryForm() {
                         <Textarea {...form.register("workflows.publicSafetyPortalScope")} />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "workflows.incidentComplianceFlow",
+                          "What incident compliance flow is required?",
+                          values.workflows.incidentComplianceFlow,
+                          (draft) => form.setValue("workflows.incidentComplianceFlow", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What incident compliance flow is required?"
                         explanation="Capture required intake steps from incident report through EHS closure."
                         example="Supervisor files intake immediately, nurse line triage is documented, reportability is reviewed by EHS, and case status remains open until all follow-up actions are complete."
@@ -2407,6 +2634,11 @@ export function DiscoveryForm() {
                   {currentStep === 8 ? (
                     <div className="grid gap-6 md:grid-cols-2">
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "scale.usersAtLaunch",
+                          "Number of users at launch",
+                          values.scale.usersAtLaunch
+                        )}
                         label="Number of users at launch"
                         explanation="Use a number only."
                         example="120"
@@ -2415,6 +2647,11 @@ export function DiscoveryForm() {
                         <Input {...form.register("scale.usersAtLaunch", { valueAsNumber: true })} type="number" />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "scale.usersIn12Months",
+                          "Number of users in 12 months",
+                          values.scale.usersIn12Months
+                        )}
                         label="Number of users in 12 months"
                         explanation="Use a number only."
                         example="320"
@@ -2423,6 +2660,11 @@ export function DiscoveryForm() {
                         <Input {...form.register("scale.usersIn12Months", { valueAsNumber: true })} type="number" />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "scale.numberOfSites",
+                          "Number of sites",
+                          values.scale.numberOfSites
+                        )}
                         label="Number of sites"
                         explanation="Use a number only."
                         example="42"
@@ -2431,6 +2673,11 @@ export function DiscoveryForm() {
                         <Input {...form.register("scale.numberOfSites", { valueAsNumber: true })} type="number" />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "scale.inspectionsPerDay",
+                          "Inspections per day",
+                          values.scale.inspectionsPerDay
+                        )}
                         label="Inspections per day"
                         explanation="Use a number only."
                         example="650"
@@ -2444,6 +2691,11 @@ export function DiscoveryForm() {
                   {currentStep === 9 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "delivery.rapidDeploymentWeeks",
+                          "What does rapid deployment mean in weeks?",
+                          values.delivery.rapidDeploymentWeeks
+                        )}
                         label="What does rapid deployment mean in weeks?"
                         explanation="Translate 'rapid' into an explicit number."
                         example="12"
@@ -2452,6 +2704,12 @@ export function DiscoveryForm() {
                         <Input {...form.register("delivery.rapidDeploymentWeeks", { valueAsNumber: true })} type="number" />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "delivery.productionReadyDefinition",
+                          "What defines production-ready?",
+                          values.delivery.productionReadyDefinition,
+                          (draft) => form.setValue("delivery.productionReadyDefinition", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What defines production-ready?"
                         explanation="State measurable criteria such as uptime expectations, roles, auditability, training, or support coverage."
                         example="Production-ready means all launch sites have validated role access, inspection and work-item flows pass UAT, audit logs are active, core dashboards are live, and Sev-1 support coverage is staffed for go-live."
@@ -2460,6 +2718,12 @@ export function DiscoveryForm() {
                         <Textarea {...form.register("delivery.productionReadyDefinition")} />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "delivery.supportLevel",
+                          "What support level is expected?",
+                          values.delivery.supportLevel,
+                          (draft) => form.setValue("delivery.supportLevel", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="What support level is expected?"
                         explanation="Specify response times, support channels, and ownership model."
                         example="Field users need in-app and phone support 6am-8pm local time, Sev-1 incidents require engineering response within 30 minutes, and Sev-2 issues require resolution plans within one business day."
@@ -2468,6 +2732,11 @@ export function DiscoveryForm() {
                         <Textarea {...form.register("delivery.supportLevel")} />
                       </FieldShell>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "delivery.priorityTradeoff",
+                          "Priority tradeoff for Phase 1",
+                          values.delivery.priorityTradeoff
+                        )}
                         label="Priority tradeoff for Phase 1"
                         explanation="Choose the primary decision lens if tradeoffs are required."
                         example="Quality first: preserve inspection accuracy, auditability, and reliability even if lower-priority enhancements move to Phase 2."
@@ -2484,6 +2753,10 @@ export function DiscoveryForm() {
                           options={priorityTradeoffOptions}
                           selected={values.delivery.priorityTradeoff}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("delivery.priorityTradeoff")}
+                          onChange={(nextValue) => setQuestionNote("delivery.priorityTradeoff", nextValue)}
+                        />
                       </FieldShell>
                     </>
                   ) : null}
@@ -2491,6 +2764,11 @@ export function DiscoveryForm() {
                   {currentStep === 10 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase1Confirmation.phase1OnlyConfirmed",
+                          "Confirm that Phase 1 includes ONLY the features already defined",
+                          values.phase1Confirmation.phase1OnlyConfirmed
+                        )}
                         label="Confirm that Phase 1 includes ONLY the features already defined"
                         explanation="If you select No, go back and adjust Phase 1 scope before continuing."
                         example="Yes, confirmed. Phase 1 includes inspections, work items, cases, and dashboards only; training automation, equipment management, and predictive analytics remain out of scope."
@@ -2510,9 +2788,18 @@ export function DiscoveryForm() {
                           ]}
                           selected={values.phase1Confirmation.phase1OnlyConfirmed}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase1Confirmation.phase1OnlyConfirmed")}
+                          onChange={(nextValue) => setQuestionNote("phase1Confirmation.phase1OnlyConfirmed", nextValue)}
+                        />
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase1Confirmation.advancedAiInPhase1",
+                          "Are you expecting ANY advanced analytics or AI in Phase 1?",
+                          values.phase1Confirmation.advancedAiInPhase1
+                        )}
                         label="Are you expecting ANY advanced analytics or AI in Phase 1?"
                         explanation="Selecting yes marks this as high risk and requires a concrete explanation."
                         example="No. Phase 1 will use standard operational dashboards only, and predictive scoring will be planned for a later phase after data quality is proven."
@@ -2532,10 +2819,20 @@ export function DiscoveryForm() {
                           ]}
                           selected={values.phase1Confirmation.advancedAiInPhase1}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase1Confirmation.advancedAiInPhase1")}
+                          onChange={(nextValue) => setQuestionNote("phase1Confirmation.advancedAiInPhase1", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.phase1Confirmation.advancedAiInPhase1 === "yes" ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "phase1Confirmation.advancedAiExplanation",
+                            "Explain the advanced analytics/AI expectation in Phase 1",
+                            values.phase1Confirmation.advancedAiExplanation,
+                            (draft) => form.setValue("phase1Confirmation.advancedAiExplanation", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Explain the advanced analytics/AI expectation in Phase 1"
                           explanation="Be explicit about what model output is required, who uses it, and how it changes workflows."
                           example="Input is inspection failures and unresolved work-item age, output is a daily risk-priority queue, and user action is manager reassignment of top-risk sites before the next shift."
@@ -2550,6 +2847,11 @@ export function DiscoveryForm() {
                   {currentStep === 11 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase2Roadmap.selectedAreas",
+                          "Which capabilities should be included in Phase 2?",
+                          values.phase2Roadmap.selectedAreas
+                        )}
                         label="Which capabilities should be included in Phase 2?"
                         explanation='Select one or more areas, or explicitly mark "No Phase 2 scope defined."'
                         example="Select work item enhancements, training management, and communication tools for Phase 2 while keeping these out of launch scope to protect Phase 1 delivery."
@@ -2579,10 +2881,20 @@ export function DiscoveryForm() {
                           />
                           No Phase 2 scope defined
                         </label>
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase2Roadmap.selectedAreas")}
+                          onChange={(nextValue) => setQuestionNote("phase2Roadmap.selectedAreas", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.phase2Roadmap.selectedAreas.includes("other") ? (
                         <FieldShell
+                          ai={getQuestionAiProps(
+                            "phase2Roadmap.otherArea",
+                            "Describe the other Phase 2 area",
+                            values.phase2Roadmap.otherArea,
+                            (draft) => form.setValue("phase2Roadmap.otherArea", draft, { shouldDirty: true, shouldValidate: true })
+                          )}
                           label="Describe the other Phase 2 area"
                           explanation="Name the area explicitly."
                           example="Customer-facing SLA exception portal with acknowledgment tracking"
@@ -2598,6 +2910,16 @@ export function DiscoveryForm() {
                             {area === "other" ? values.phase2Roadmap.otherArea || "Other" : phase2AreaOptions.find((option) => option.value === area)?.label}
                           </h3>
                           <FieldShell
+                            ai={getQuestionAiProps(
+                              `phase2Roadmap.details.${area}.successDefinition`,
+                              "Describe what success looks like for this feature",
+                              values.phase2Roadmap.details[area].successDefinition,
+                              (draft) =>
+                                form.setValue(`phase2Roadmap.details.${area}.successDefinition` as Path<DiscoveryValidatedValues>, draft as never, {
+                                  shouldDirty: true,
+                                  shouldValidate: true
+                                })
+                            )}
                             label="Describe what success looks like for this feature"
                             explanation="Minimum 20 words. Include who uses it, the action, and expected outcome."
                             example="Operations managers and team leads use this feature to assign, monitor, and close work with clear SLA targets so overdue tasks drop by 30 percent and customer escalations decline quarter over quarter."
@@ -2606,6 +2928,11 @@ export function DiscoveryForm() {
                             <Textarea {...form.register(`phase2Roadmap.details.${area}.successDefinition` as Path<DiscoveryValidatedValues>)} />
                           </FieldShell>
                           <FieldShell
+                            ai={getQuestionAiProps(
+                              `phase2Roadmap.details.${area}.requiredForPhase1`,
+                              "Is this REQUIRED for Phase 1?",
+                              values.phase2Roadmap.details[area].requiredForPhase1
+                            )}
                             label="Is this REQUIRED for Phase 1?"
                             explanation="Selecting Yes indicates scope bleed and requires explicit confirmation."
                             example="No for most items. Select Yes only when launch operations fail without this capability and the business accepts longer timeline and higher delivery risk."
@@ -2624,6 +2951,10 @@ export function DiscoveryForm() {
                                 { value: "yes", label: "Yes (forces reclassification)" }
                               ]}
                               selected={values.phase2Roadmap.details[area].requiredForPhase1}
+                            />
+                            <ChoiceContextNote
+                              value={getQuestionNote(`phase2Roadmap.details.${area}.requiredForPhase1`)}
+                              onChange={(nextValue) => setQuestionNote(`phase2Roadmap.details.${area}.requiredForPhase1`, nextValue)}
                             />
                           </FieldShell>
                           {values.phase2Roadmap.details[area].requiredForPhase1 === "yes" ? (
@@ -2669,6 +3000,11 @@ export function DiscoveryForm() {
                       />
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase2Roadmap.expectedTimeline",
+                          "Expected timeline for Phase 2",
+                          values.phase2Roadmap.expectedTimeline
+                        )}
                         label="Expected timeline for Phase 2"
                         explanation="Set clear expectation for when expansion work begins."
                         example="3-6 months after Phase 1 stabilization and baseline adoption metrics are met."
@@ -2685,9 +3021,18 @@ export function DiscoveryForm() {
                           options={phase2TimelineOptions}
                           selected={values.phase2Roadmap.expectedTimeline}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase2Roadmap.expectedTimeline")}
+                          onChange={(nextValue) => setQuestionNote("phase2Roadmap.expectedTimeline", nextValue)}
+                        />
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase2Roadmap.deferredModules",
+                          "Which not-yet-launched modules are intentionally deferred to Phase 2?",
+                          values.phase2Roadmap.deferredModules
+                        )}
                         label="Which not-yet-launched modules are intentionally deferred to Phase 2?"
                         explanation="Select modules intentionally postponed beyond Phase 1 launch scope."
                         example="Scheduling/routes and equipment preventive maintenance are deferred to Phase 2 to protect launch focus on inspections, work items, and cases."
@@ -2705,6 +3050,10 @@ export function DiscoveryForm() {
                             />
                           ))}
                         </div>
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase2Roadmap.deferredModules")}
+                          onChange={(nextValue) => setQuestionNote("phase2Roadmap.deferredModules", nextValue)}
+                        />
                       </FieldShell>
                     </>
                   ) : null}
@@ -2712,6 +3061,11 @@ export function DiscoveryForm() {
                   {currentStep === 12 ? (
                     <>
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.selectedCapabilities",
+                          "Which AI / predictive capabilities are important in the long-term vision?",
+                          values.phase3Roadmap.selectedCapabilities
+                        )}
                         label="Which AI / predictive capabilities are important in the long-term vision?"
                         explanation="Phase 3 capabilities should assume strong data maturity and are not expected in initial delivery."
                         example="Prioritize predictive risk detection, location health scoring, anomaly detection, and automated next-best action recommendations after core inspection and work-item data is stable."
@@ -2729,6 +3083,10 @@ export function DiscoveryForm() {
                             />
                           ))}
                         </div>
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase3Roadmap.selectedCapabilities")}
+                          onChange={(nextValue) => setQuestionNote("phase3Roadmap.selectedCapabilities", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.phase3Roadmap.selectedCapabilities.includes("other") ? (
@@ -2779,6 +3137,11 @@ export function DiscoveryForm() {
                       ))}
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.dataSources",
+                          "What data sources will power these capabilities?",
+                          values.phase3Roadmap.dataSources
+                        )}
                         label="What data sources will power these capabilities?"
                         explanation="Select all that apply."
                         example="Use inspections, work items, cases, employee activity, and training completion data so predictions reflect execution quality, responsiveness, and workforce readiness."
@@ -2794,6 +3157,10 @@ export function DiscoveryForm() {
                             />
                           ))}
                         </div>
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase3Roadmap.dataSources")}
+                          onChange={(nextValue) => setQuestionNote("phase3Roadmap.dataSources", nextValue)}
+                        />
                       </FieldShell>
 
                       {values.phase3Roadmap.dataSources.includes("other") ? (
@@ -2814,6 +3181,11 @@ export function DiscoveryForm() {
                       ) : null}
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.dataReadiness",
+                          "How clean and reliable is this data today?",
+                          values.phase3Roadmap.dataReadiness
+                        )}
                         label="How clean and reliable is this data today?"
                         explanation="Choose the best current-state assessment."
                         example="Somewhat clean: inspection and work-item data are consistent, but case tags and legacy location mapping need normalization before model training."
@@ -2830,9 +3202,18 @@ export function DiscoveryForm() {
                           options={phase3DataReadinessOptions}
                           selected={values.phase3Roadmap.dataReadiness}
                         />
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase3Roadmap.dataReadiness")}
+                          onChange={(nextValue) => setQuestionNote("phase3Roadmap.dataReadiness", nextValue)}
+                        />
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.timelineExpectation",
+                          "When do you expect AI capabilities to be available?",
+                          values.phase3Roadmap.timelineExpectation
+                        )}
                         label="When do you expect AI capabilities to be available?"
                         explanation="Earlier expectations increase complexity and risk."
                         example="Phase 3 (recommended) after at least two quarters of stable structured data and baseline process adoption."
@@ -2848,6 +3229,10 @@ export function DiscoveryForm() {
                           }
                           options={phase3TimelineExpectationOptions}
                           selected={values.phase3Roadmap.timelineExpectation}
+                        />
+                        <ChoiceContextNote
+                          value={getQuestionNote("phase3Roadmap.timelineExpectation")}
+                          onChange={(nextValue) => setQuestionNote("phase3Roadmap.timelineExpectation", nextValue)}
                         />
                       </FieldShell>
 
@@ -2907,6 +3292,12 @@ export function DiscoveryForm() {
                       </FieldShell>
 
                       <FieldShell
+                        ai={getQuestionAiProps(
+                          "phase3Roadmap.aiGovernanceOwner",
+                          "Who owns AI governance and production decision rights?",
+                          values.phase3Roadmap.aiGovernanceOwner,
+                          (draft) => form.setValue("phase3Roadmap.aiGovernanceOwner", draft, { shouldDirty: true, shouldValidate: true })
+                        )}
                         label="Who owns AI governance and production decision rights?"
                         explanation="Name the accountable owner role or function."
                         example="Director of Operational Excellence with joint approval from EHS and Data Governance for model changes and release readiness."
@@ -2925,19 +3316,25 @@ export function DiscoveryForm() {
                 ) : null}
 
                 <div className="border-t border-[var(--border)] pt-6">
-                  <Button onClick={() => void advanceFlow()} type="button" disabled={isPending} className="w-full">
-                    {isFinalStep && !hasNextQuestionInSection ? (
-                      <>
-                        {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                        Submit questionnaire
-                      </>
-                    ) : (
-                      <>
-                        Next
-                        <ChevronRight className="h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Button disabled={!canRetreat || isPending} onClick={retreatFlow} type="button" variant="ghost">
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous question
+                    </Button>
+                    <Button onClick={() => void advanceFlow()} type="button" disabled={isPending} className="w-full">
+                      {isFinalStep && !hasNextQuestionInSection ? (
+                        <>
+                          {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          Submit questionnaire
+                        </>
+                      ) : (
+                        <>
+                          Next
+                          <ChevronRight className="h-4 w-4" />
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </section>
             )}

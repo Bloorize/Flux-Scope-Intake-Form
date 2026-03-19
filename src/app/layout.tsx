@@ -4,8 +4,8 @@ import { HeaderAuthControls } from "../components/clerk-client-switch";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Enterprise Discovery Form",
-  description: "Structured discovery workflow for enterprise operations platform scoping and LOE estimation."
+  title: "Ruxton Scope Clarification",
+  description: "Ruxton Scope Clarification questionnaire for capturing project requirements, constraints, and phased delivery priorities."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
