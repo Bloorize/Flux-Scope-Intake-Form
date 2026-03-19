@@ -73,6 +73,31 @@ type ValidationIssue = {
   isSuggestion: boolean;
 };
 
+const DISCOVERY_DRAFT_STORAGE_KEY = "discovery-form-draft-v1";
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const mergeWithDefaults = <T,>(defaults: T, candidate: unknown): T => {
+  if (Array.isArray(defaults)) {
+    return (Array.isArray(candidate) ? candidate : defaults) as T;
+  }
+
+  if (!isPlainObject(defaults)) {
+    return (candidate === undefined ? defaults : candidate) as T;
+  }
+
+  if (!isPlainObject(candidate)) {
+    return defaults;
+  }
+
+  const merged: Record<string, unknown> = {};
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    merged[key] = mergeWithDefaults(defaultValue, candidate[key]);
+  }
+  return merged as T;
+};
+
 const getErrorMessage = (
   errors: FieldErrors<DiscoveryValidatedValues>,
   path: string,
@@ -917,6 +942,7 @@ export function DiscoveryForm() {
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
+  const hasHydratedDraftRef = useRef(false);
   const aiProvider: AiProviderOption = "auto";
 
   const form = useForm<DiscoveryValidatedValues>({
@@ -1152,20 +1178,96 @@ export function DiscoveryForm() {
   }, [submissionWarnings]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || hasHydratedDraftRef.current) {
+      return;
+    }
+
+    hasHydratedDraftRef.current = true;
+
+    const raw = window.localStorage.getItem(DISCOVERY_DRAFT_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as {
+        values?: unknown;
+        entryStage?: unknown;
+        currentStep?: unknown;
+        currentQuestionIndex?: unknown;
+      };
+
+      if (parsed.values !== undefined) {
+        const restoredValues = mergeWithDefaults(defaultDiscoveryValues, parsed.values);
+        form.reset(restoredValues);
+      }
+
+      if (
+        parsed.entryStage === "welcome" ||
+        parsed.entryStage === "scope-summary" ||
+        parsed.entryStage === "blind-spots" ||
+        parsed.entryStage === "questions"
+      ) {
+        setEntryStage(parsed.entryStage);
+      }
+
+      if (typeof parsed.currentStep === "number" && Number.isFinite(parsed.currentStep)) {
+        const boundedStep = Math.min(Math.max(Math.trunc(parsed.currentStep), 0), discoverySections.length - 1);
+        setCurrentStep(boundedStep);
+      }
+
+      if (typeof parsed.currentQuestionIndex === "number" && Number.isFinite(parsed.currentQuestionIndex)) {
+        setCurrentQuestionIndex(Math.max(Math.trunc(parsed.currentQuestionIndex), 0));
+      }
+    } catch {
+      window.localStorage.removeItem(DISCOVERY_DRAFT_STORAGE_KEY);
+    }
+  }, [form]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasHydratedDraftRef.current) {
+      return;
+    }
+
+    if (submission) {
+      window.localStorage.removeItem(DISCOVERY_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    const draft = {
+      values,
+      entryStage,
+      currentStep,
+      currentQuestionIndex
+    };
+
+    try {
+      window.localStorage.setItem(DISCOVERY_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    } catch {
+      // Ignore quota/storage errors and keep the form usable.
+    }
+  }, [values, entryStage, currentStep, currentQuestionIndex, submission]);
+
+  useEffect(() => {
     const section = questionSectionRef.current;
     if (!section) {
       return;
     }
 
     const questions = Array.from(section.querySelectorAll<HTMLElement>("[data-question-shell='true']"));
-    setQuestionCount(questions.length);
-    setQuestionTitles(
-      questions.map((question, index) => {
-        const heading = question.querySelector<HTMLElement>("[data-question-label='true']");
-        const text = heading?.textContent?.trim();
-        return text && text.length > 0 ? text : `Question ${index + 1}`;
-      })
-    );
+    const nextTitles = questions.map((question, index) => {
+      const heading = question.querySelector<HTMLElement>("[data-question-label='true']");
+      const text = heading?.textContent?.trim();
+      return text && text.length > 0 ? text : `Question ${index + 1}`;
+    });
+
+    setQuestionCount((previous) => (previous === questions.length ? previous : questions.length));
+    setQuestionTitles((previous) => {
+      if (previous.length === nextTitles.length && previous.every((item, index) => item === nextTitles[index])) {
+        return previous;
+      }
+      return nextTitles;
+    });
 
     const nextIndex = questions.length === 0 ? 0 : Math.min(currentQuestionIndex, questions.length - 1);
     if (nextIndex !== currentQuestionIndex) {
@@ -1345,7 +1447,22 @@ export function DiscoveryForm() {
       });
 
       if (!response.ok) {
-        setApiError("Submission failed. The mock endpoint did not accept the payload.");
+        let errorMessage = `Submission failed (${response.status}).`;
+        try {
+          const errorPayload = (await response.json()) as { error?: string; detail?: string; hint?: string };
+          const parts = [errorPayload.error, errorPayload.detail, errorPayload.hint].filter(
+            (part): part is string => typeof part === "string" && part.trim().length > 0
+          );
+          if (parts.length > 0) {
+            errorMessage = parts.join(" ");
+          }
+        } catch {
+          // Fall back to generic status text when response is not JSON.
+          if (response.statusText) {
+            errorMessage = `Submission failed (${response.status} ${response.statusText}).`;
+          }
+        }
+        setApiError(errorMessage);
         return;
       }
 

@@ -37,17 +37,42 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data, error } = await supabase
-    .from("form_submissions")
-    .insert({
-      user_id: userId,
-      user_email: userEmail,
-      structured: payload.structured,
-      summary: payload.summary,
-      loe: payload.loe
-    })
-    .select("id, created_at")
-    .single();
+  const baseInsert = {
+    structured: payload.structured,
+    summary: payload.summary,
+    loe: payload.loe
+  };
+
+  const insertWithUserColumns = async () =>
+    supabase
+      .from("form_submissions")
+      .insert({
+        ...baseInsert,
+        user_id: userId,
+        user_email: userEmail
+      })
+      .select("id, created_at")
+      .single();
+
+  const insertWithoutUserColumns = async () =>
+    supabase
+      .from("form_submissions")
+      .insert(baseInsert)
+      .select("id, created_at")
+      .single();
+
+  let { data, error } = await insertWithUserColumns();
+
+  const detail = error?.message ?? "";
+  const isMissingUserColumnError =
+    detail.includes("Could not find the 'user_email' column") || detail.includes("Could not find the 'user_id' column");
+
+  if (error && isMissingUserColumnError) {
+    // Backward compatibility for older local schemas that do not yet have user columns.
+    const fallbackResult = await insertWithoutUserColumns();
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
 
   if (error) {
     return NextResponse.json(
@@ -55,6 +80,16 @@ export async function POST(request: Request) {
         error: "Failed to save submission to Supabase.",
         detail: error.message,
         hint: "Ensure form_submissions has user_id and user_email columns."
+      },
+      { status: 502 }
+    );
+  }
+
+  if (!data) {
+    return NextResponse.json(
+      {
+        error: "Failed to save submission to Supabase.",
+        detail: "Insert did not return a row."
       },
       { status: 502 }
     );
