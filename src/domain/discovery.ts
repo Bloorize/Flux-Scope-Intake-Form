@@ -218,6 +218,19 @@ const hasActionVerb = (value: string) => {
   return actionVerbs.some((verb) => normalized.includes(verb));
 };
 
+const suggestionMessageMatchers = [
+  " is required.",
+  "needs a bit more detail",
+  "is too vague because it includes",
+  "should describe an action",
+  "must explicitly mention",
+  "must state how long users are expected to operate offline",
+  "must include expected sync frequency or offline duration"
+] as const;
+
+export const isSuggestionValidationMessage = (message: string) =>
+  suggestionMessageMatchers.some((matcher) => message.includes(matcher));
+
 const addSpecificityIssue = (
   ctx: z.RefinementCtx,
   path: (string | number)[],

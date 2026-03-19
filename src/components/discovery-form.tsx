@@ -12,6 +12,7 @@ import {
   defaultDiscoveryValues,
   discoveryFormSchema,
   discoverySections,
+  isSuggestionValidationMessage,
   type AiReviewResponse,
   type DiscoveryValidatedValues,
   integrationDepthOptions,
@@ -60,7 +61,20 @@ type QuestionAiState = {
 
 type AiProviderOption = "auto" | "gemini" | "openai" | "zai" | "kimi";
 
-const getErrorMessage = (errors: FieldErrors<DiscoveryValidatedValues>, path: string) => {
+type ValidationIssue = {
+  sectionIndex: number;
+  sectionTitle: string;
+  sectionShortTitle: string;
+  fieldPath: string;
+  message: string;
+  isSuggestion: boolean;
+};
+
+const getErrorMessage = (
+  errors: FieldErrors<DiscoveryValidatedValues>,
+  path: string,
+  options?: { includeSuggestions?: boolean }
+) => {
   const value = path.split(".").reduce<unknown>((accumulator, part) => {
     if (accumulator && typeof accumulator === "object") {
       return (accumulator as Record<string, unknown>)[part];
@@ -96,7 +110,56 @@ const getErrorMessage = (errors: FieldErrors<DiscoveryValidatedValues>, path: st
     return undefined;
   };
 
-  return findNestedMessage(value);
+  const message = findNestedMessage(value);
+  if (!message) {
+    return undefined;
+  }
+
+  if (!options?.includeSuggestions && isSuggestionValidationMessage(message)) {
+    return undefined;
+  }
+
+  return message;
+};
+
+const collectValidationIssues = (
+  errors: FieldErrors<DiscoveryValidatedValues>,
+  targetSections?: number[]
+): ValidationIssue[] => {
+  const sectionIndexes = targetSections ?? discoverySections.map((_, index) => index);
+  const dedupe = new Set<string>();
+  const issues: ValidationIssue[] = [];
+
+  for (const sectionIndex of sectionIndexes) {
+    const section = discoverySections[sectionIndex];
+    if (!section) {
+      continue;
+    }
+
+    for (const fieldPath of section.fieldPaths) {
+      const message = getErrorMessage(errors, fieldPath, { includeSuggestions: true });
+      if (!message) {
+        continue;
+      }
+
+      const key = `${section.id}:${fieldPath}:${message}`;
+      if (dedupe.has(key)) {
+        continue;
+      }
+      dedupe.add(key);
+
+      issues.push({
+        sectionIndex,
+        sectionTitle: section.title,
+        sectionShortTitle: section.shortTitle,
+        fieldPath,
+        message,
+        isSuggestion: isSuggestionValidationMessage(message)
+      });
+    }
+  }
+
+  return issues;
 };
 
 const buildQaDummyValues = (): DiscoveryValidatedValues => ({
@@ -843,6 +906,8 @@ export function DiscoveryForm() {
   const [questionCount, setQuestionCount] = useState(0);
   const [questionTitles, setQuestionTitles] = useState<string[]>([]);
   const [submission, setSubmission] = useState<SubmissionState | null>(null);
+  const [submissionWarnings, setSubmissionWarnings] = useState<ValidationIssue[]>([]);
+  const [showSubmitWarningDialog, setShowSubmitWarningDialog] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [showNavigationError, setShowNavigationError] = useState(false);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
@@ -1030,7 +1095,6 @@ export function DiscoveryForm() {
     [currentQuestionIndex, questionCount]
   );
   const hasNextQuestionInSection = currentQuestionIndex < Math.max(questionCount - 1, 0);
-  const canAdvanceSection = !hasNextQuestionInSection;
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
 
@@ -1060,8 +1124,30 @@ export function DiscoveryForm() {
                           : activeSection.id === "phase2-roadmap"
                             ? values.phase2Roadmap
                             : values.phase3Roadmap;
-  const navigationError =
-    activeSection.fieldPaths.map((fieldPath) => getErrorMessage(form.formState.errors, fieldPath)).find(Boolean) ?? null;
+  const activeSectionBlockingIssues = useMemo(
+    () => collectValidationIssues(form.formState.errors, [currentStep]).filter((issue) => !issue.isSuggestion),
+    [currentStep, form.formState.errors]
+  );
+  const navigationError = activeSectionBlockingIssues[0]?.message ?? null;
+  const canAdvanceSection = !hasNextQuestionInSection && activeSectionBlockingIssues.length === 0;
+  const warningSections = useMemo(() => {
+    const grouped = new Map<string, { sectionIndex: number; sectionShortTitle: string; messages: string[] }>();
+    for (const warning of submissionWarnings) {
+      const existing = grouped.get(warning.sectionShortTitle);
+      if (existing) {
+        if (!existing.messages.includes(warning.message)) {
+          existing.messages.push(warning.message);
+        }
+      } else {
+        grouped.set(warning.sectionShortTitle, {
+          sectionIndex: warning.sectionIndex,
+          sectionShortTitle: warning.sectionShortTitle,
+          messages: [warning.message]
+        });
+      }
+    }
+    return Array.from(grouped.values()).sort((a, b) => a.sectionIndex - b.sectionIndex);
+  }, [submissionWarnings]);
 
   useEffect(() => {
     const section = questionSectionRef.current;
@@ -1240,10 +1326,12 @@ export function DiscoveryForm() {
     }
   });
 
-  const performSubmission = (rawValues: DiscoveryValidatedValues) => {
+  const performSubmission = (rawValues: DiscoveryValidatedValues, options?: { bypassValidation?: boolean }) => {
     setApiError(null);
     startTransition(async () => {
-      const validatedValues = discoveryFormSchema.parse(rawValues) as DiscoveryValidatedValues;
+      const validatedValues = options?.bypassValidation
+        ? rawValues
+        : (discoveryFormSchema.parse(rawValues) as DiscoveryValidatedValues);
       const structured = buildStructuredOutput(validatedValues);
       const summary = buildReadableSummary(validatedValues);
       const loe = classifyLoe(validatedValues);
@@ -1265,13 +1353,14 @@ export function DiscoveryForm() {
   };
 
   const nextStep = async () => {
-    if (!canAdvanceSection) {
+    if (hasNextQuestionInSection) {
       setShowNavigationError(true);
       return;
     }
 
-    const valid = await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
-    if (!valid) {
+    await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
+    const blockingIssues = collectValidationIssues(form.formState.errors, [currentStep]).filter((issue) => !issue.isSuggestion);
+    if (blockingIssues.length > 0) {
       setShowNavigationError(true);
       return;
     }
@@ -1293,13 +1382,14 @@ export function DiscoveryForm() {
       return;
     }
 
-    if (!canAdvanceSection) {
+    if (hasNextQuestionInSection) {
       setShowNavigationError(true);
       return;
     }
 
-    const valid = await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
-    if (!valid) {
+    await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
+    const blockingIssues = collectValidationIssues(form.formState.errors, [currentStep]).filter((issue) => !issue.isSuggestion);
+    if (blockingIssues.length > 0) {
       setShowNavigationError(true);
       return;
     }
@@ -1320,14 +1410,38 @@ export function DiscoveryForm() {
     form.setValue(path, nextValues as never, { shouldDirty: true, shouldValidate: true });
   };
 
-  const submit = form.handleSubmit(async (rawValues) => {
-    performSubmission(rawValues);
-  });
+  const submit = async () => {
+    setApiError(null);
+    setShowNavigationError(false);
+
+    await form.trigger(undefined, { shouldFocus: true });
+    const issues = collectValidationIssues(form.formState.errors);
+    const blockingIssues = issues.filter((issue) => !issue.isSuggestion);
+    const warningIssues = issues.filter((issue) => issue.isSuggestion);
+
+    if (blockingIssues.length > 0) {
+      const firstBlockingIssue = blockingIssues[0];
+      setCurrentQuestionIndex(0);
+      setCurrentStep(firstBlockingIssue.sectionIndex);
+      setShowNavigationError(true);
+      return;
+    }
+
+    if (warningIssues.length > 0) {
+      setSubmissionWarnings(warningIssues);
+      setShowSubmitWarningDialog(true);
+      return;
+    }
+
+    performSubmission(values);
+  };
 
   const quickQaSubmit = () => {
     const dummyValues = buildQaDummyValues();
     setApiError(null);
     setShowNavigationError(false);
+    setShowSubmitWarningDialog(false);
+    setSubmissionWarnings([]);
     form.reset(dummyValues);
     setCurrentStep(discoverySections.length - 1);
     performSubmission(dummyValues);
@@ -1353,6 +1467,8 @@ export function DiscoveryForm() {
                 <Button
                   onClick={() => {
                     setSubmission(null);
+                    setSubmissionWarnings([]);
+                    setShowSubmitWarningDialog(false);
                     setCurrentQuestionIndex(0);
                     setCurrentStep(0);
                   }}
@@ -2709,7 +2825,7 @@ export function DiscoveryForm() {
 
                 {showNavigationError && (navigationError ?? true) ? (
                   <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
-                    {!canAdvanceSection
+                    {hasNextQuestionInSection
                       ? "Complete all question steps in this section before continuing."
                       : (navigationError ?? "This section needs a bit more detail before you can move on.")}
                   </div>
@@ -2762,15 +2878,81 @@ export function DiscoveryForm() {
                     </div>
                   </div>
                   <div className="text-xs text-[var(--muted-foreground)]">
-                    {!canAdvanceSection
+                    {hasNextQuestionInSection
                       ? `Complete step ${Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of ${Math.max(questionCount, 1)} to unlock next section.`
-                      : "All section steps are complete. You can continue to the next section."}
+                      : activeSectionBlockingIssues.length > 0
+                        ? "Required fields still need answers before you can continue."
+                        : "All section steps are complete. You can continue to the next section."}
+                  </div>
+                  <div className="text-xs text-[var(--muted-foreground)]/80">
+                    Required issues block submission. Suggestions can be reviewed and skipped with confirmation.
                   </div>
                 </div>
               </section>
             </CardContent>
         </Card>
       </div>
+
+      {showSubmitWarningDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-white p-6 shadow-xl">
+            <div className="space-y-2">
+              <h3 className="text-xl font-semibold text-[var(--foreground)]">Suggestions before submission</h3>
+              <p className="text-sm leading-6 text-[var(--muted-foreground)]">
+                AI found {submissionWarnings.length} suggestion{submissionWarnings.length === 1 ? "" : "s"} that may improve output quality.
+                You can still submit now.
+              </p>
+            </div>
+            <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
+              {warningSections.map((group) => (
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 p-3" key={`warning-section-${group.sectionShortTitle}`}>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-[var(--foreground)]">
+                      Section {group.sectionIndex + 1}: {group.sectionShortTitle}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setShowSubmitWarningDialog(false);
+                        setCurrentStep(group.sectionIndex);
+                        setCurrentQuestionIndex(0);
+                      }}
+                    >
+                      Review section
+                    </Button>
+                  </div>
+                  <ul className="space-y-1 text-sm text-[var(--muted-foreground)]">
+                    {group.messages.slice(0, 3).map((message) => (
+                      <li key={`${group.sectionShortTitle}-${message}`}>- {message}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setShowSubmitWarningDialog(false);
+                }}
+              >
+                Improve answers
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setShowSubmitWarningDialog(false);
+                  performSubmission(values, { bypassValidation: true });
+                }}
+              >
+                Proceed anyway
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-8 flex justify-center">
         <button
