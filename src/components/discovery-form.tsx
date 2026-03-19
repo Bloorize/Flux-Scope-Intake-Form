@@ -58,33 +58,7 @@ type QuestionAiState = {
   updatedAt?: string;
 };
 
-type ExperienceStage = "overview" | "blind-spots" | "questions";
-
 type AiProviderOption = "auto" | "gemini" | "openai" | "zai" | "kimi";
-
-const introSteps: { id: ExperienceStage; badge: string; title: string; description: string }[] = [
-  {
-    id: "overview",
-    badge: "AI kickoff summary",
-    title: "Align the scope before asking for details",
-    description:
-      "This intake starts by framing the likely solution shape, then highlights the biggest unknowns, then moves into guided questions one at a time."
-  },
-  {
-    id: "blind-spots",
-    badge: "Blind spots and gaps",
-    title: "Surface the decisions that most often derail scope",
-    description:
-      "The form will push for launch boundaries, current-state reality, mobile and offline constraints, and phased AI expectations without assuming technical fluency."
-  },
-  {
-    id: "questions",
-    badge: "Guided Q&A",
-    title: "Answer one question at a time",
-    description:
-      "Each answer can be reviewed inline with AI for that specific question, and navigation only moves forward after the current section is complete."
-  }
-];
 
 const getErrorMessage = (errors: FieldErrors<DiscoveryValidatedValues>, path: string) => {
   const value = path.split(".").reduce<unknown>((accumulator, part) => {
@@ -864,7 +838,6 @@ function SummaryPanel({ submission }: { submission: SubmissionState }) {
 }
 
 export function DiscoveryForm() {
-  const [experienceStage, setExperienceStage] = useState<ExperienceStage>("overview");
   const [currentStep, setCurrentStep] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questionCount, setQuestionCount] = useState(0);
@@ -1056,6 +1029,8 @@ export function DiscoveryForm() {
     () => (questionCount > 0 ? ((Math.min(currentQuestionIndex, questionCount - 1) + 1) / questionCount) * 100 : 0),
     [currentQuestionIndex, questionCount]
   );
+  const hasNextQuestionInSection = currentQuestionIndex < Math.max(questionCount - 1, 0);
+  const canAdvanceSection = !hasNextQuestionInSection;
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
 
@@ -1087,25 +1062,6 @@ export function DiscoveryForm() {
                             : values.phase3Roadmap;
   const navigationError =
     activeSection.fieldPaths.map((fieldPath) => getErrorMessage(form.formState.errors, fieldPath)).find(Boolean) ?? null;
-
-  const kickoffSummary = useMemo(
-    () => [
-      "Likely outcome: a phased scope definition that separates launch-critical workflows from later operational expansion.",
-      "Primary solution themes: guided data capture, operational workflows, integrations, mobile/offline constraints, and a realistic AI roadmap.",
-      "Best-fit collaboration mode: short stakeholder answers with inline AI coaching rather than a standalone review module."
-    ],
-    []
-  );
-
-  const blindSpots = useMemo(
-    () => [
-      "Launch boundary: which capabilities truly must exist on Day 1 versus what can wait.",
-      "Current-state friction: the systems, spreadsheets, and manual steps that need replacement first.",
-      "Field execution constraints: whether responsive web is enough or mobile/offline support is genuinely required.",
-      "Future-state ambition: how much analytics and AI belongs later instead of inflating Phase 1."
-    ],
-    []
-  );
 
   useEffect(() => {
     const section = questionSectionRef.current;
@@ -1309,6 +1265,11 @@ export function DiscoveryForm() {
   };
 
   const nextStep = async () => {
+    if (!canAdvanceSection) {
+      setShowNavigationError(true);
+      return;
+    }
+
     const valid = await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
     if (!valid) {
       setShowNavigationError(true);
@@ -1329,6 +1290,11 @@ export function DiscoveryForm() {
       setShowNavigationError(false);
       setCurrentQuestionIndex(0);
       setCurrentStep(nextStepIndex);
+      return;
+    }
+
+    if (!canAdvanceSection) {
+      setShowNavigationError(true);
       return;
     }
 
@@ -1364,7 +1330,6 @@ export function DiscoveryForm() {
     setShowNavigationError(false);
     form.reset(dummyValues);
     setCurrentStep(discoverySections.length - 1);
-    setExperienceStage("questions");
     performSubmission(dummyValues);
   };
 
@@ -1388,7 +1353,6 @@ export function DiscoveryForm() {
                 <Button
                   onClick={() => {
                     setSubmission(null);
-                    setExperienceStage("questions");
                     setCurrentQuestionIndex(0);
                     setCurrentStep(0);
                   }}
@@ -1416,18 +1380,16 @@ export function DiscoveryForm() {
                 <div>
                   <h1 className="text-3xl font-semibold tracking-tight text-[var(--foreground)] md:text-4xl">Guided scope intake</h1>
                   <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
-                    This version leads with orientation, then moves through one visible question at a time with inline AI help attached to the exact answer being edited.
+                    Complete each section step-by-step. Move through one question at a time, then continue to the next section.
                   </p>
                 </div>
               </div>
               <div className="min-w-[220px] space-y-2">
                 <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
-                  <span>Progress</span>
-                  <span>
-                    {experienceStage === "questions" ? `${currentStep + 1} / ${discoverySections.length}` : `${introSteps.findIndex((step) => step.id === experienceStage) + 1} / ${introSteps.length}`}
-                  </span>
+                  <span>Section progress</span>
+                  <span>{currentStep + 1} / {discoverySections.length}</span>
                 </div>
-                <Progress value={experienceStage === "questions" ? progress : ((introSteps.findIndex((step) => step.id === experienceStage) + 1) / introSteps.length) * 100} />
+                <Progress value={progress} />
                 <div className="space-y-1 pt-2">
                   <label className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">AI routing</label>
                   <div className="h-9 rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 text-sm leading-9 text-[var(--foreground)]">
@@ -1438,58 +1400,7 @@ export function DiscoveryForm() {
             </div>
           </CardHeader>
 
-          {experienceStage !== "questions" ? (
-            <CardContent className="space-y-6 p-6 md:p-8">
-              <div className="grid gap-4 md:grid-cols-3">
-                {introSteps.map((step) => (
-                  <button
-                    key={step.id}
-                    type="button"
-                    onClick={() => setExperienceStage(step.id)}
-                    className={cn(
-                      "rounded-2xl border px-5 py-4 text-left transition-colors",
-                      experienceStage === step.id ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-sm" : "border-[var(--border)] bg-white hover:bg-[var(--muted)]"
-                    )}
-                  >
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">{step.badge}</div>
-                    <div className="mt-2 text-lg font-semibold text-[var(--foreground)]">{step.title}</div>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{step.description}</p>
-                  </button>
-                ))}
-              </div>
-
-              {experienceStage === "overview" ? (
-                <div className="space-y-3">
-                  {kickoffSummary.map((item) => (
-                    <div className="rounded-2xl border border-[var(--border)] bg-white px-5 py-4 text-sm leading-6 text-[var(--foreground)]" key={item}>
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {experienceStage === "blind-spots" ? (
-                <div className="space-y-3">
-                  {blindSpots.map((item) => (
-                    <div className="rounded-2xl border border-[var(--border)] bg-white px-5 py-4 text-sm leading-6 text-[var(--foreground)]" key={item}>
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="flex justify-end">
-                <Button
-                  onClick={() => setExperienceStage(experienceStage === "overview" ? "blind-spots" : "questions")}
-                  type="button"
-                >
-                  {experienceStage === "blind-spots" ? "Start questions" : "Review blind spots"}
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          ) : (
-            <CardContent className="space-y-6 p-6 md:p-8">
+          <CardContent className="space-y-6 p-6 md:p-8">
               <div className="flex flex-wrap gap-3">
                 {discoverySections.map((section, index) => (
                   <button
@@ -2798,7 +2709,9 @@ export function DiscoveryForm() {
 
                 {showNavigationError && (navigationError ?? true) ? (
                   <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
-                    {navigationError ?? "This section needs a bit more detail before you can move on."}
+                    {!canAdvanceSection
+                      ? "Complete all question steps in this section before continuing."
+                      : (navigationError ?? "This section needs a bit more detail before you can move on.")}
                   </div>
                 ) : null}
 
@@ -2835,7 +2748,7 @@ export function DiscoveryForm() {
                           Previous section
                         </Button>
                         {!isFinalStep ? (
-                          <Button onClick={nextStep} type="button">
+                          <Button onClick={nextStep} type="button" disabled={!canAdvanceSection || isPending}>
                             Continue to next section
                             <ChevronRight className="h-4 w-4" />
                           </Button>
@@ -2849,12 +2762,13 @@ export function DiscoveryForm() {
                     </div>
                   </div>
                   <div className="text-xs text-[var(--muted-foreground)]">
-                    Finish all steps in this section, then use section navigation to move forward.
+                    {!canAdvanceSection
+                      ? `Complete step ${Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of ${Math.max(questionCount, 1)} to unlock next section.`
+                      : "All section steps are complete. You can continue to the next section."}
                   </div>
                 </div>
               </section>
             </CardContent>
-          )}
         </Card>
       </div>
 
