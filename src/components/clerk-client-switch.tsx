@@ -12,7 +12,7 @@ export function AuthSwitch({
   const { isLoaded, isSignedIn } = useAuth();
 
   if (!isLoaded) {
-    return null;
+    return <>{signedOut}</>;
   }
 
   return isSignedIn ? <>{signedIn}</> : <>{signedOut}</>;

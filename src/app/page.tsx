@@ -1,5 +1,3 @@
-"use client";
-
 import { SignIn } from "@clerk/nextjs";
 import { AuthSwitch } from "../components/clerk-client-switch";
 import { DiscoveryForm } from "../components/discovery-form";
