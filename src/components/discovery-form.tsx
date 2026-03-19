@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Bot, Check, ChevronLeft, ChevronRight, CircleAlert, FileJson2, LoaderCircle, Sparkles } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useForm, useWatch, type Control, type FieldErrors, type Path, type Resolver, type UseFormRegister, type UseFormSetValue } from "react-hook-form";
 import {
@@ -35,6 +36,8 @@ import {
   priorityTradeoffOptions,
   spaceTypeGovernanceOptions
 } from "../domain/discovery";
+import ruxtonLogo from "../images/ruxton_logo2.png";
+import verdeLogo from "../images/verde_logo.png";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -382,6 +385,7 @@ function FieldShell({
   };
 }) {
   const review = ai?.reviewState?.review;
+  const hasAiAssist = Boolean(ai);
 
   return (
     <div className="space-y-4" data-question-shell="true">
@@ -407,28 +411,29 @@ function FieldShell({
           <span>{error}</span>
         </p>
       ) : null}
-      {ai ? (
-        <div className="space-y-3 rounded-2xl border border-[var(--border)] bg-white/90 p-4">
+      <div className="space-y-3 rounded-2xl border border-[var(--border)] bg-white/90 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-[var(--foreground)]">AI assist for this question</p>
               <p className="text-sm leading-6 text-[var(--muted-foreground)]">
-                Review this answer in context or generate a cleaner draft without leaving the question.
+                {hasAiAssist
+                  ? "Review this answer in context or generate a cleaner draft without leaving the question."
+                  : "AI guidance appears here for this question type. Continue to the next step if review is unavailable."}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button disabled={ai.reviewState?.isReviewing} onClick={ai.onReview} type="button" variant="secondary">
-                {ai.reviewState?.isReviewing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+              <Button disabled={!hasAiAssist || ai?.reviewState?.isReviewing} onClick={() => ai?.onReview()} type="button" variant="secondary">
+                {ai?.reviewState?.isReviewing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
                 Review answer
               </Button>
-              <Button disabled={ai.reviewState?.isGenerating} onClick={ai.onGenerateDraft} type="button" variant="ghost">
-                {ai.reviewState?.isGenerating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              <Button disabled={!hasAiAssist || ai?.reviewState?.isGenerating} onClick={() => ai?.onGenerateDraft()} type="button" variant="ghost">
+                {ai?.reviewState?.isGenerating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 Improve answer
               </Button>
             </div>
           </div>
 
-          {ai.reviewState?.error ? (
+          {ai?.reviewState?.error ? (
             <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
               {ai.reviewState.error}
             </div>
@@ -455,7 +460,7 @@ function FieldShell({
             </div>
           ) : null}
 
-          {ai.reviewState?.draft ? (
+          {ai?.reviewState?.draft ? (
             <div className="space-y-3">
               <Textarea rows={8} value={ai.reviewState.draft} onChange={(event) => ai.onDraftChange(event.target.value)} />
               <div className="flex justify-end">
@@ -465,8 +470,7 @@ function FieldShell({
               </div>
             </div>
           ) : null}
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
@@ -901,6 +905,7 @@ function SummaryPanel({ submission }: { submission: SubmissionState }) {
 }
 
 export function DiscoveryForm() {
+  const [entryStage, setEntryStage] = useState<"welcome" | "scope-summary" | "blind-spots" | "questions">("welcome");
   const [currentStep, setCurrentStep] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questionCount, setQuestionCount] = useState(0);
@@ -909,7 +914,6 @@ export function DiscoveryForm() {
   const [submissionWarnings, setSubmissionWarnings] = useState<ValidationIssue[]>([]);
   const [showSubmitWarningDialog, setShowSubmitWarningDialog] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [showNavigationError, setShowNavigationError] = useState(false);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
@@ -1090,13 +1094,17 @@ export function DiscoveryForm() {
     }
   };
   const progress = useMemo(() => ((currentStep + 1) / discoverySections.length) * 100, [currentStep]);
-  const sectionQuestionProgress = useMemo(
-    () => (questionCount > 0 ? ((Math.min(currentQuestionIndex, questionCount - 1) + 1) / questionCount) * 100 : 0),
-    [currentQuestionIndex, questionCount]
-  );
   const hasNextQuestionInSection = currentQuestionIndex < Math.max(questionCount - 1, 0);
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
+  const entryStageOrder: Array<"welcome" | "scope-summary" | "blind-spots" | "questions"> = [
+    "welcome",
+    "scope-summary",
+    "blind-spots",
+    "questions"
+  ];
+  const entryStageIndex = entryStageOrder.indexOf(entryStage);
+  const entryProgress = ((entryStageIndex + 1) / entryStageOrder.length) * 100;
 
   const activeSectionData =
     activeSection.id === "phase1"
@@ -1124,12 +1132,6 @@ export function DiscoveryForm() {
                           : activeSection.id === "phase2-roadmap"
                             ? values.phase2Roadmap
                             : values.phase3Roadmap;
-  const activeSectionBlockingIssues = useMemo(
-    () => collectValidationIssues(form.formState.errors, [currentStep]).filter((issue) => !issue.isSuggestion),
-    [currentStep, form.formState.errors]
-  );
-  const navigationError = activeSectionBlockingIssues[0]?.message ?? null;
-  const canAdvanceSection = !hasNextQuestionInSection && activeSectionBlockingIssues.length === 0;
   const warningSections = useMemo(() => {
     const grouped = new Map<string, { sectionIndex: number; sectionShortTitle: string; messages: string[] }>();
     for (const warning of submissionWarnings) {
@@ -1353,56 +1355,22 @@ export function DiscoveryForm() {
   };
 
   const nextStep = async () => {
-    if (hasNextQuestionInSection) {
-      setShowNavigationError(true);
-      return;
-    }
-
-    await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
-    const blockingIssues = collectValidationIssues(form.formState.errors, [currentStep]).filter((issue) => !issue.isSuggestion);
-    if (blockingIssues.length > 0) {
-      setShowNavigationError(true);
-      return;
-    }
-
-    setShowNavigationError(false);
     setCurrentQuestionIndex(0);
     setCurrentStep((step) => Math.min(step + 1, discoverySections.length - 1));
   };
 
-  const jumpToStep = async (nextStepIndex: number) => {
-    if (nextStepIndex === currentStep) {
-      return;
-    }
-
-    if (nextStepIndex < currentStep) {
-      setShowNavigationError(false);
-      setCurrentQuestionIndex(0);
-      setCurrentStep(nextStepIndex);
-      return;
-    }
-
+  const advanceFlow = async () => {
     if (hasNextQuestionInSection) {
-      setShowNavigationError(true);
+      setCurrentQuestionIndex((index) => Math.min(index + 1, Math.max(questionCount - 1, 0)));
       return;
     }
 
-    await form.trigger(activeSection.fieldPaths as Path<DiscoveryValidatedValues>[], { shouldFocus: true });
-    const blockingIssues = collectValidationIssues(form.formState.errors, [currentStep]).filter((issue) => !issue.isSuggestion);
-    if (blockingIssues.length > 0) {
-      setShowNavigationError(true);
+    if (!isFinalStep) {
+      await nextStep();
       return;
     }
 
-    setShowNavigationError(false);
-    setCurrentQuestionIndex(0);
-    setCurrentStep(nextStepIndex);
-  };
-
-  const previousStep = () => {
-    setShowNavigationError(false);
-    setCurrentQuestionIndex(0);
-    setCurrentStep((step) => Math.max(step - 1, 0));
+    await submit();
   };
 
   const toggleArrayValue = <T extends string>(path: Path<DiscoveryValidatedValues>, currentValues: T[], value: T) => {
@@ -1412,20 +1380,10 @@ export function DiscoveryForm() {
 
   const submit = async () => {
     setApiError(null);
-    setShowNavigationError(false);
 
-    await form.trigger(undefined, { shouldFocus: true });
+    await form.trigger(undefined, { shouldFocus: false });
     const issues = collectValidationIssues(form.formState.errors);
-    const blockingIssues = issues.filter((issue) => !issue.isSuggestion);
-    const warningIssues = issues.filter((issue) => issue.isSuggestion);
-
-    if (blockingIssues.length > 0) {
-      const firstBlockingIssue = blockingIssues[0];
-      setCurrentQuestionIndex(0);
-      setCurrentStep(firstBlockingIssue.sectionIndex);
-      setShowNavigationError(true);
-      return;
-    }
+    const warningIssues = issues;
 
     if (warningIssues.length > 0) {
       setSubmissionWarnings(warningIssues);
@@ -1439,7 +1397,6 @@ export function DiscoveryForm() {
   const quickQaSubmit = () => {
     const dummyValues = buildQaDummyValues();
     setApiError(null);
-    setShowNavigationError(false);
     setShowSubmitWarningDialog(false);
     setSubmissionWarnings([]);
     form.reset(dummyValues);
@@ -1467,6 +1424,7 @@ export function DiscoveryForm() {
                 <Button
                   onClick={() => {
                     setSubmission(null);
+                    setEntryStage("questions");
                     setSubmissionWarnings([]);
                     setShowSubmitWarningDialog(false);
                     setCurrentQuestionIndex(0);
@@ -1490,96 +1448,122 @@ export function DiscoveryForm() {
       <div className="mx-auto max-w-6xl space-y-6">
         <Card className="overflow-hidden">
           <CardHeader className="border-b border-[var(--border)] bg-white/80 backdrop-blur">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-3">
-                <Badge>Enterprise operations platform discovery</Badge>
-                <div>
-                  <h1 className="text-3xl font-semibold tracking-tight text-[var(--foreground)] md:text-4xl">Guided scope intake</h1>
-                  <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
-                    Complete each section step-by-step. Move through one question at a time, then continue to the next section.
-                  </p>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="rounded-xl border border-[var(--border)] bg-white px-3 py-2">
+                  <Image
+                    src={ruxtonLogo}
+                    alt="Ruxton Labs logo"
+                    width={300}
+                    height={64}
+                    className="h-16 w-auto object-contain"
+                    priority
+                  />
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-white px-3 py-2">
+                  <Image
+                    src={verdeLogo}
+                    alt="Verde Clean logo"
+                    width={300}
+                    height={64}
+                    className="h-16 w-auto object-contain"
+                    priority
+                  />
+                </div>
+                <div className="rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-sm text-[var(--muted-foreground)]">
+                  HeySage Intelligent Operations Platform
                 </div>
               </div>
-              <div className="min-w-[220px] space-y-2">
+              <div>
+                <h1 className="text-3xl font-semibold tracking-tight text-[var(--foreground)] md:text-4xl">Scope Clarification Questionnaire</h1>
+                <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
+                  Answer each prompt in plain language. AI suggestions help improve quality, but you can always proceed.
+                </p>
+              </div>
+              <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
-                  <span>Section progress</span>
-                  <span>{currentStep + 1} / {discoverySections.length}</span>
+                  {entryStage === "questions" ? (
+                    <>
+                      <span>Overall progress</span>
+                      <span>
+                        Section {currentStep + 1} / {discoverySections.length}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Getting started</span>
+                      <span>
+                        Step {entryStageIndex + 1} / {entryStageOrder.length}
+                      </span>
+                    </>
+                  )}
                 </div>
-                <Progress value={progress} />
-                <div className="space-y-1 pt-2">
-                  <label className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">AI routing</label>
-                  <div className="h-9 rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 text-sm leading-9 text-[var(--foreground)]">
-                    Auto
-                  </div>
-                </div>
+                <Progress value={entryStage === "questions" ? progress : entryProgress} />
               </div>
             </div>
           </CardHeader>
 
           <CardContent className="space-y-6 p-6 md:p-8">
-              <div className="flex flex-wrap gap-3">
-                {discoverySections.map((section, index) => (
-                  <button
-                    key={section.id}
-                    className={cn(
-                      "rounded-full border px-4 py-2 text-sm transition-colors",
-                      index === currentStep
-                        ? "border-[var(--accent)] bg-[var(--accent)] text-white shadow-sm"
-                        : index < currentStep
-                          ? "border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--foreground)] hover:bg-[var(--accent-soft)]/80"
-                          : "border-[var(--border)] bg-white text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
-                    )}
-                    onClick={() => void jumpToStep(index)}
+            {entryStage !== "questions" ? (
+              <div className="space-y-5">
+                {entryStage === "welcome" ? (
+                  <>
+                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">Welcome to the Ruxton Labs Guided Scope Intake Wizard</h2>
+                    <p className="text-sm leading-7 text-[var(--muted-foreground)]">
+                      This experience helps you clarify launch scope, risks, and phased roadmap decisions for the HeySage Intelligent Operations
+                      Platform.
+                    </p>
+                    <ul className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
+                      <li>- Expect roughly 12 to 18 minutes to complete.</li>
+                      <li>- You will answer one question at a time with optional AI coaching.</li>
+                      <li>- Your answers become a structured scope output for planning and delivery.</li>
+                    </ul>
+                  </>
+                ) : null}
+
+                {entryStage === "scope-summary" ? (
+                  <>
+                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">AI-generated scope summary</h2>
+                    <div className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
+                      <p>- Current direction favors a phased rollout: launch-critical operations first, then roadmap expansion.</p>
+                      <p>- Most value is expected from inspection workflows, corrective action tracking, integrations, and mobile execution clarity.</p>
+                      <p>- AI capabilities should be sequenced behind stable operational data and governance ownership.</p>
+                    </div>
+                  </>
+                ) : null}
+
+                {entryStage === "blind-spots" ? (
+                  <>
+                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">Blind spot analysis</h2>
+                    <div className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
+                      <p>- Day 1 boundaries are often too broad and create delivery risk.</p>
+                      <p>- Offline and mobile assumptions may be underspecified for field users.</p>
+                      <p>- Integration depth and latency expectations are frequently unclear at kickoff.</p>
+                    </div>
+                  </>
+                ) : null}
+
+                <div className="pt-3">
+                  <Button
+                    onClick={() => {
+                      const next = Math.min(entryStageIndex + 1, entryStageOrder.length - 1);
+                      setEntryStage(entryStageOrder[next]);
+                    }}
                     type="button"
-                    aria-current={index === currentStep ? "step" : undefined}
                   >
-                    {String(index + 1).padStart(2, "0")} {section.shortTitle}
-                  </button>
-                ))}
+                    {entryStage === "blind-spots" ? "Start Q&A" : "Next"}
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
+            ) : (
 
               <section className="space-y-6" ref={questionSectionRef}>
-                <div className="space-y-3">
-                  <Badge>{activeSection.title}</Badge>
-                  <div>
-                    <h2 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">{activeSection.prompt}</h2>
-                    <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">{activeSection.description}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] px-4 py-4 text-sm text-[var(--foreground)]">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-semibold">
-                        Section {currentStep + 1} of {discoverySections.length}: {activeSection.shortTitle}
-                      </span>
-                      <span className="text-[var(--muted-foreground)]">
-                        Step {Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of {Math.max(questionCount, 1)}
-                      </span>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      <Progress value={sectionQuestionProgress} />
-                      <p className="text-xs leading-5 text-[var(--muted-foreground)]">
-                        You are moving through one question at a time within this section.
-                      </p>
-                    </div>
-                    {questionTitles.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {questionTitles.map((title, index) => (
-                          <button
-                            key={`${activeSection.id}-question-title-${index}`}
-                            type="button"
-                            onClick={() => setCurrentQuestionIndex(index)}
-                            className={cn(
-                              "max-w-full rounded-full border px-3 py-1 text-xs transition-colors",
-                              index === currentQuestionIndex
-                                ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                                : "border-[var(--border)] bg-white text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
-                            )}
-                          >
-                            {index + 1}. {title}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
+                <div className="space-y-2">
+                  <h2 className="text-xl font-semibold tracking-tight text-[var(--foreground)]">{activeSection.shortTitle}</h2>
+                  <p className="text-sm text-[var(--muted-foreground)]">
+                    Question {Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of {Math.max(questionCount, 1)} in this section.
+                  </p>
                 </div>
 
                 <div className="space-y-8">
@@ -2823,73 +2807,24 @@ export function DiscoveryForm() {
                   </div>
                 ) : null}
 
-                {showNavigationError && (navigationError ?? true) ? (
-                  <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
-                    {hasNextQuestionInSection
-                      ? "Complete all question steps in this section before continuing."
-                      : (navigationError ?? "This section needs a bit more detail before you can move on.")}
-                  </div>
-                ) : null}
-
-                <div className="space-y-4 border-t border-[var(--border)] pt-6">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Question navigation</p>
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          onClick={() => setCurrentQuestionIndex((index) => Math.max(index - 1, 0))}
-                          type="button"
-                          variant="ghost"
-                          disabled={currentQuestionIndex === 0}
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                          Previous question
-                        </Button>
-                        <Button
-                          onClick={() => setCurrentQuestionIndex((index) => Math.min(index + 1, Math.max(questionCount - 1, 0)))}
-                          type="button"
-                          variant="secondary"
-                          disabled={currentQuestionIndex >= questionCount - 1}
-                        >
-                          Next question
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Section navigation</p>
-                      <div className="flex flex-wrap gap-3">
-                        <Button onClick={previousStep} type="button" variant="ghost" disabled={currentStep === 0 || isPending}>
-                          <ChevronLeft className="h-4 w-4" />
-                          Previous section
-                        </Button>
-                        {!isFinalStep ? (
-                          <Button onClick={nextStep} type="button" disabled={!canAdvanceSection || isPending}>
-                            Continue to next section
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        ) : (
-                          <Button onClick={submit} type="button" disabled={isPending}>
-                            {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                            Generate structured output
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-[var(--muted-foreground)]">
-                    {hasNextQuestionInSection
-                      ? `Complete step ${Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of ${Math.max(questionCount, 1)} to unlock next section.`
-                      : activeSectionBlockingIssues.length > 0
-                        ? "Required fields still need answers before you can continue."
-                        : "All section steps are complete. You can continue to the next section."}
-                  </div>
-                  <div className="text-xs text-[var(--muted-foreground)]/80">
-                    Required issues block submission. Suggestions can be reviewed and skipped with confirmation.
-                  </div>
+                <div className="border-t border-[var(--border)] pt-6">
+                  <Button onClick={() => void advanceFlow()} type="button" disabled={isPending} className="w-full">
+                    {isFinalStep && !hasNextQuestionInSection ? (
+                      <>
+                        {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        Submit questionnaire
+                      </>
+                    ) : (
+                      <>
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
                 </div>
               </section>
-            </CardContent>
+            )}
+          </CardContent>
         </Card>
       </div>
 
@@ -2915,6 +2850,7 @@ export function DiscoveryForm() {
                       variant="ghost"
                       onClick={() => {
                         setShowSubmitWarningDialog(false);
+                        setEntryStage("questions");
                         setCurrentStep(group.sectionIndex);
                         setCurrentQuestionIndex(0);
                       }}
