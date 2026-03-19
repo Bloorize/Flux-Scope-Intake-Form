@@ -1,4 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
+import ruxtonLogo from "../images/ruxton_logo2.png";
 
 export default function HomePage() {
   return (
@@ -6,7 +8,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl space-y-10">
         <section className="rounded-3xl border border-[var(--border)] bg-white/90 p-8 shadow-sm md:p-12">
           <div className="space-y-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">Ruxton Labs</p>
+            <Image src={ruxtonLogo} alt="Ruxton Labs" width={300} height={64} className="h-14 w-auto object-contain" priority />
             <h1 className="text-4xl font-semibold tracking-tight text-[var(--foreground)] md:text-5xl">
               Flux: precise project scoping, protected margins, stronger client alignment.
             </h1>
