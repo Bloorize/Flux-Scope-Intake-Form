@@ -1,8 +1,66 @@
+"use client";
+
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import heroBannerOne from "../images/hero_banner_1.png";
+import heroBannerTwo from "../images/hero_banner_2.png";
 import ruxtonLogo from "../images/ruxton_logo_clear.png";
 
+type HeroSlide = {
+  image: typeof heroBannerOne;
+  headline: string;
+  description: string;
+  tone: "dark" | "light";
+};
+
+const heroSlides: HeroSlide[] = [
+  {
+    image: heroBannerOne,
+    headline: "Define it. Track it. Protect it.",
+    description:
+      "Flux is the always-on desktop companion for agencies and consultancies that need tighter scope control, faster client decisions, and stronger project margins.",
+    tone: "dark"
+  },
+  {
+    image: heroBannerTwo,
+    headline: "Structure project chaos.",
+    description:
+      "Convert raw documents, discussions, and ideas into an organized, committed scope pipeline in seconds.",
+    tone: "light"
+  }
+];
+
 export default function HomePage() {
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [autoSeed, setAutoSeed] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveSlide((current) => (current + 1) % heroSlides.length);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [autoSeed]);
+
+  const goToSlide = (index: number) => {
+    setActiveSlide(index);
+    setAutoSeed((value) => value + 1);
+  };
+
+  const goNext = () => {
+    setActiveSlide((current) => (current + 1) % heroSlides.length);
+    setAutoSeed((value) => value + 1);
+  };
+
+  const goPrevious = () => {
+    setActiveSlide((current) => (current - 1 + heroSlides.length) % heroSlides.length);
+    setAutoSeed((value) => value + 1);
+  };
+
+  const currentSlide = heroSlides[activeSlide];
+  const isDarkSlide = currentSlide.tone === "dark";
+
   return (
     <main className="landing-root min-h-screen overflow-hidden">
       <div className="relative mx-auto flex min-h-screen w-full max-w-[1400px] flex-col px-4 pb-14 pt-2 md:px-8">
@@ -51,33 +109,75 @@ export default function HomePage() {
           </div>
         </header>
 
-        <section className="relative flex min-h-[56vh] items-center justify-center px-4 pt-4 md:px-6 md:pt-8">
-          <div
-            className="pointer-events-none absolute inset-0 opacity-55"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at 50% 18%, rgba(125,94,255,0.18), transparent 34%), linear-gradient(rgba(15,23,35,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,35,0.06) 1px, transparent 1px)",
-              backgroundSize: "100% 100%, 120px 120px, 120px 120px",
-              backgroundPosition: "center, center, center"
-            }}
-          />
-          <div className="relative z-10 mx-auto flex max-w-5xl flex-col items-center text-center">
-            <div className="landing-fade-up-delay-1 inline-flex items-center gap-2 rounded-lg bg-white/90 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[#6366f1] shadow-[0_10px_24px_rgba(37,99,235,0.14)]">
-              Flux by Ruxton Labs
+        <section className="relative mx-auto mb-10 mt-4 w-full max-w-6xl px-1 md:mb-14 md:px-0">
+          <div className="relative overflow-hidden rounded-xl border border-white/40 shadow-[0_20px_60px_rgba(15,23,35,0.2)]">
+            <Image
+              alt="Flux hero banner"
+              className="h-auto w-full transition-opacity duration-500"
+              priority
+              src={currentSlide.image}
+            />
+            <div
+              className="pointer-events-none absolute inset-y-0 left-0 w-[62%]"
+              style={{
+                background: isDarkSlide
+                  ? "linear-gradient(90deg, rgba(5,10,22,0.82) 0%, rgba(5,10,22,0.58) 45%, rgba(5,10,22,0) 100%)"
+                  : "linear-gradient(90deg, rgba(248,250,255,0.95) 0%, rgba(248,250,255,0.76) 45%, rgba(248,250,255,0) 100%)"
+              }}
+            />
+
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full max-w-[54%] px-6 py-6 md:px-12">
+                <h1
+                  className={`text-balance text-4xl font-semibold tracking-[-0.03em] md:text-6xl ${
+                    isDarkSlide ? "text-white" : "text-[#0b1220]"
+                  }`}
+                >
+                  {currentSlide.headline}
+                </h1>
+                <p className={`mt-4 max-w-xl text-balance text-base leading-7 md:text-2xl md:leading-9 ${isDarkSlide ? "text-white/85" : "text-[#475569]"}`}>
+                  {currentSlide.description}
+                </p>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <Link className="landing-button-secondary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/sign-in">
+                    Sign in
+                  </Link>
+                  <Link className="landing-button-primary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/start-scope-form">
+                    Open Scope Form
+                  </Link>
+                </div>
+              </div>
             </div>
-            <h1 className="landing-fade-up-delay-2 mt-6 text-balance text-4xl font-semibold tracking-[-0.03em] text-[#0b1220] md:text-7xl">
-              Define it. Track it. Protect it.
-            </h1>
-            <p className="landing-fade-up-delay-2 mt-6 max-w-3xl text-balance text-lg leading-8 text-[#475569] md:text-2xl md:leading-10">
-              Flux is the always-on desktop companion for agencies and consultancies that need tighter scope control, faster client decisions, and stronger project margins.
-            </p>
-            <div className="landing-fade-up-delay-3 mt-8 flex flex-wrap justify-center gap-3">
-              <Link className="landing-button-secondary inline-flex h-12 items-center justify-center px-6 text-sm font-semibold" href="/sign-in">
-                Sign in
-              </Link>
-              <Link className="landing-button-primary inline-flex h-12 items-center justify-center px-6 text-sm font-semibold" href="/start-scope-form">
-                Open Scope Form
-              </Link>
+
+            <div className="absolute bottom-4 right-4 flex items-center gap-2">
+              <button
+                aria-label="Previous banner"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-white/88 text-[#0f1723] shadow-[0_8px_22px_rgba(15,23,35,0.2)] transition hover:bg-white"
+                onClick={goPrevious}
+                type="button"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                aria-label="Next banner"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-white/88 text-[#0f1723] shadow-[0_8px_22px_rgba(15,23,35,0.2)] transition hover:bg-white"
+                onClick={goNext}
+                type="button"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-2">
+              {heroSlides.map((_, index) => (
+                <button
+                  aria-label={`Go to banner ${index + 1}`}
+                  className={`h-2.5 rounded-full transition-all ${index === activeSlide ? "w-6 bg-white" : "w-2.5 bg-white/65"}`}
+                  key={index}
+                  onClick={() => goToSlide(index)}
+                  type="button"
+                />
+              ))}
             </div>
           </div>
         </section>
