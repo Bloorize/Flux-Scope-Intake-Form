@@ -10,9 +10,10 @@ export default async function ClientAccessPage({ params }: ClientAccessPageProps
     .join(" ");
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.14),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
-      <div className="mx-auto max-w-xl space-y-6">
-        <div className="rounded-3xl bg-white px-6 py-8 shadow-[0_1px_2px_rgba(16,24,40,0.05),0_16px_44px_rgba(16,24,40,0.12)] md:px-8">
+    <main className="app-themed-root px-4 py-10 md:px-8">
+      <div className="app-hero-pattern" />
+      <div className="app-content-layer mx-auto max-w-xl space-y-6">
+        <div className="app-surface-card px-6 py-8 md:px-8">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6366f1]">Client Access</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[#0f1723] md:text-3xl">{companyName}</h1>
           <p className="mt-3 text-sm leading-7 text-[#475569]">
@@ -34,7 +35,7 @@ export default async function ClientAccessPage({ params }: ClientAccessPageProps
           </form>
         </div>
 
-        <div className="rounded-2xl border border-[#e2e8f0] bg-white px-5 py-4 text-sm leading-7 text-[#475569]">
+        <div className="app-surface-card px-5 py-4 text-sm leading-7 text-[#475569]">
           This client workspace is not enabled yet. Please contact Ruxton Labs to activate access.
         </div>
       </div>

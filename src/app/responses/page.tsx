@@ -323,14 +323,16 @@ export default function ResponsesPage() {
   return (
     <>
       {!isSignedIn ? (
-        <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
-          <div className="mx-auto flex max-w-7xl justify-center">
+        <main className="app-themed-root px-4 py-10 md:px-8">
+          <div className="app-hero-pattern" />
+          <div className="app-content-layer mx-auto flex max-w-7xl justify-center">
             <SignIn fallbackRedirectUrl="/" path="/sign-in" routing="path" signUpUrl="/sign-up" />
           </div>
         </main>
       ) : (
-        <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
-          <div className="mx-auto max-w-7xl space-y-6">
+        <main className="app-themed-root px-4 py-10 md:px-8">
+          <div className="app-hero-pattern" />
+          <div className="app-content-layer mx-auto max-w-7xl space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <Badge>
@@ -371,12 +373,12 @@ export default function ResponsesPage() {
               </div>
             </div>
 
-            <Card>
-          <CardHeader>
-            <CardTitle>Submission browser</CardTitle>
-            <CardDescription>Select a submission to inspect full details.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+            <Card className="app-surface-card">
+              <CardHeader>
+                <CardTitle>Submission browser</CardTitle>
+                <CardDescription>Select a submission to inspect full details.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
             {savedSubmissionsError ? (
               <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
                 {savedSubmissionsError}
@@ -400,41 +402,41 @@ export default function ResponsesPage() {
                 {selectedSavedSubmission ? (
                   <div className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-3">
-                      <div className="rounded-xl bg-[var(--muted)] p-4">
+                      <div className="app-surface-card p-4">
                         <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Submitted</div>
                         <div className="mt-2 text-sm font-medium text-[var(--foreground)]">
                           {new Date(selectedSavedSubmission.created_at).toLocaleString()}
                         </div>
                       </div>
-                      <div className="rounded-xl bg-[var(--muted)] p-4">
+                      <div className="app-surface-card p-4">
                         <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">LOE</div>
                         <div className="mt-2 text-sm font-medium text-[var(--foreground)]">{selectedSavedSubmission.loe?.classification ?? "-"}</div>
                       </div>
-                      <div className="rounded-xl bg-[var(--muted)] p-4">
+                      <div className="app-surface-card p-4">
                         <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Range</div>
                         <div className="mt-2 text-sm font-medium text-[var(--foreground)]">{selectedSavedSubmission.loe?.range ?? "-"}</div>
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+                    <div className="app-surface-card p-4">
                       <h3 className="text-sm font-semibold text-[var(--foreground)]">Phase 1 scope summary</h3>
                       <p className="mt-2 whitespace-pre-line text-sm leading-6 text-[var(--foreground)]">
                         {selectedSavedSubmission.summary?.phase1Scope ?? "-"}
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+                    <div className="app-surface-card p-4">
                       <h3 className="text-sm font-semibold text-[var(--foreground)]">Use case 1: Clean web UI</h3>
                       <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
                         Full question and answer view generated from the saved submission record.
                       </p>
                       <div className="mt-4 space-y-4">
                         {qaGroups.map(([section, items]) => (
-                          <div className="rounded-xl border border-[var(--border)] p-4" key={section}>
+                          <div className="app-surface-card p-4" key={section}>
                             <h4 className="text-sm font-semibold text-[var(--foreground)]">{section}</h4>
                             <div className="mt-3 space-y-3">
                               {items.map((item) => (
-                                <div className="rounded-lg bg-[var(--muted)]/60 p-3" key={item.path}>
+                                <div className="rounded-lg bg-[#f3f6fb] p-3" key={item.path}>
                                   <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted-foreground)]">
                                     {item.question}
                                   </div>
@@ -447,7 +449,7 @@ export default function ResponsesPage() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+                    <div className="app-surface-card p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <h3 className="text-sm font-semibold text-[var(--foreground)]">Use case 2: Raw markdown extraction</h3>
                         <Button onClick={() => void copyMarkdown()} size="sm" type="button" variant="secondary">
@@ -470,7 +472,7 @@ export default function ResponsesPage() {
                 No saved submissions yet. Submit the form once, then come back here.
               </p>
             )}
-          </CardContent>
+              </CardContent>
             </Card>
           </div>
         </main>

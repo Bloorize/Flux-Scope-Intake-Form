@@ -1781,9 +1781,10 @@ export function DiscoveryForm() {
 
   if (submission) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
-        <div className="mx-auto max-w-3xl space-y-6">
-          <Card>
+      <main className="app-themed-root px-4 py-10 md:px-8">
+        <div className="app-hero-pattern" />
+        <div className="app-content-layer mx-auto max-w-3xl space-y-6">
+          <Card className="app-surface-card">
             <CardHeader>
               <Badge>Submitted</Badge>
               <CardTitle className="mt-1 text-3xl">Thanks for submitting.</CardTitle>
@@ -1819,62 +1820,58 @@ export function DiscoveryForm() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <Card>
+    <main className="app-themed-root px-4 py-10 md:px-8">
+      <div className="app-hero-pattern" />
+      <div className="app-content-layer mx-auto max-w-6xl space-y-6">
+        <Card className="app-surface-card">
           <CardHeader
             className={cn(
-              "sticky top-0 z-30 border-b border-[var(--border)] bg-white/90 backdrop-blur transition-all duration-200",
+              "sticky top-2 z-40 rounded-xl border border-[var(--border)] bg-white/88 shadow-[0_1px_2px_rgba(16,24,40,0.05),0_14px_40px_rgba(16,24,40,0.12)] backdrop-blur transition-all duration-200",
               isHeaderCondensed ? "py-3" : "py-6"
             )}
           >
-            <div className={cn("transition-all duration-200", isHeaderCondensed ? "space-y-2" : "space-y-4")}>
-              <div className={cn("flex flex-wrap items-center transition-all duration-200", isHeaderCondensed ? "gap-2" : "gap-4")}>
-                <div className="rounded-xl border border-[var(--border)] bg-white px-3 py-2">
+            <div className={cn("transition-all duration-200", isHeaderCondensed ? "space-y-2" : "space-y-3")}>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className={cn("flex flex-wrap items-center transition-all duration-200", isHeaderCondensed ? "gap-2" : "gap-3")}>
+                  <div className="rounded-lg border border-[var(--border)] bg-white px-2.5 py-1.5">
                   <Image
                     src={ruxtonLogo}
                     alt="Ruxton Labs logo"
                     width={300}
                     height={64}
-                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-16")}
+                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-11")}
                     priority
                   />
-                </div>
-                <div className="rounded-xl border border-[var(--border)] bg-white px-3 py-2">
+                  </div>
+                  <div className="rounded-lg border border-[var(--border)] bg-white px-2.5 py-1.5">
                   <Image
                     src={verdeLogo}
                     alt="Verde Clean logo"
                     width={300}
                     height={64}
-                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-16")}
+                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-11")}
                     priority
                   />
+                  </div>
+                  <div
+                    className={cn(
+                      "rounded-full border border-[var(--border)] bg-white text-[var(--muted-foreground)] transition-all duration-200",
+                      isHeaderCondensed ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm"
+                    )}
+                  >
+                    HeySage Intelligent Operations Platform
+                  </div>
                 </div>
-                <div
-                  className={cn(
-                    "rounded-full border border-[var(--border)] bg-white text-[var(--muted-foreground)] transition-all duration-200",
-                    isHeaderCondensed ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm"
-                  )}
-                >
-                  HeySage Intelligent Operations Platform
-                </div>
-              </div>
-              <div>
                 <h1
                   className={cn(
                     "font-semibold tracking-tight text-[var(--foreground)] transition-all duration-200",
-                    isHeaderCondensed ? "text-xl md:text-2xl" : "text-3xl md:text-4xl"
+                    isHeaderCondensed ? "text-2xl md:text-3xl" : "text-4xl md:text-5xl"
                   )}
                 >
                   Scope Clarification Questionnaire
                 </h1>
-                {!isHeaderCondensed ? (
-                  <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
-                    Answer each prompt in plain language. AI suggestions help improve quality, but you can always proceed.
-                  </p>
-                ) : null}
               </div>
-              <div className={cn("space-y-2 transition-all duration-200", isHeaderCondensed ? "pt-1" : "")}>
+              <div className={cn("space-y-2 border-t border-[var(--border)] transition-all duration-200", isHeaderCondensed ? "pt-1.5" : "pt-2")}>
                 <div
                   className={cn(
                     "flex items-center justify-between text-[var(--muted-foreground)] transition-all duration-200",

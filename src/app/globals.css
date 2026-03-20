@@ -54,6 +54,53 @@ pre {
   animation: landingBackgroundShift 14s ease-in-out infinite;
 }
 
+.app-themed-root {
+  position: relative;
+  min-height: 100vh;
+  color: #0f1723;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 10% -10%, rgba(120, 85, 255, 0.12), transparent 32%),
+    radial-gradient(circle at 90% 10%, rgba(21, 126, 251, 0.1), transparent 36%),
+    linear-gradient(180deg, #fafbff 0%, #f5f7fb 44%, #f9fbff 100%);
+  background-size: 130% 130%;
+  animation: landingBackgroundShift 14s ease-in-out infinite;
+}
+
+.app-hero-pattern {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(circle at 50% 18%, rgba(125, 94, 255, 0.18), transparent 34%),
+    linear-gradient(rgba(15, 23, 35, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 35, 0.06) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    120px 120px,
+    120px 120px;
+  background-position:
+    center,
+    center,
+    center;
+}
+
+.app-content-layer {
+  position: relative;
+  z-index: 1;
+}
+
+.app-surface-card {
+  border-radius: 0.7rem;
+  border: 1px solid rgba(15, 23, 35, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow:
+    0 2px 8px rgba(15, 23, 35, 0.04),
+    0 20px 40px rgba(15, 23, 35, 0.08);
+}
+
 .landing-grid {
   width: min(1200px, 100%);
   margin: 0 auto;
@@ -155,6 +202,7 @@ pre {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-themed-root,
   .landing-root,
   .landing-fade-up,
   .landing-fade-up-delay-1,
