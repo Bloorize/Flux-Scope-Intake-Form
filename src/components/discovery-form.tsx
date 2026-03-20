@@ -1833,7 +1833,7 @@ export function DiscoveryForm() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        <Card className="overflow-hidden">
+        <Card>
           <CardHeader
             className={cn(
               "sticky top-0 z-30 border-b border-[var(--border)] bg-white/90 backdrop-blur transition-all duration-200",

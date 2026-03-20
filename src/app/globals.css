@@ -62,7 +62,7 @@ pre {
 }
 
 .landing-shell {
-  border-radius: 1.5rem;
+  border-radius: 0.9rem;
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(8px);
   box-shadow:
@@ -71,7 +71,7 @@ pre {
 }
 
 .landing-card {
-  border-radius: 1.15rem;
+  border-radius: 0.7rem;
   background: #fff;
   box-shadow:
     0 2px 8px rgba(15, 23, 35, 0.04),
@@ -79,7 +79,7 @@ pre {
 }
 
 .landing-pill {
-  border-radius: 9999px;
+  border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.96);
   padding: 0.42rem 0.75rem;
   font-size: 0.77rem;
@@ -89,7 +89,7 @@ pre {
 }
 
 .landing-button-primary {
-  border-radius: 0.7rem;
+  border-radius: 0.5rem;
   background: linear-gradient(135deg, #1f73ff 0%, #7d5eff 100%);
   color: #fff;
   transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
@@ -102,7 +102,7 @@ pre {
 }
 
 .landing-button-secondary {
-  border-radius: 0.7rem;
+  border-radius: 0.5rem;
   background: rgba(255, 255, 255, 0.9);
   color: #152238;
   transition: transform 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
