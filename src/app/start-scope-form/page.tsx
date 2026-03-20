@@ -6,21 +6,21 @@ type CompanyEntry = {
 };
 
 const companies: CompanyEntry[] = [
-  { name: "Aspen Operations Co.", href: "/client-access/aspen-operations-co" },
-  { name: "Atlas Field Performance", href: "/client-access/atlas-field-performance" },
-  { name: "Blue Harbor Logistics", href: "/client-access/blue-harbor-logistics" },
-  { name: "ClearPath Maintenance", href: "/client-access/clearpath-maintenance" },
-  { name: "Elevate Campus Operations", href: "/client-access/elevate-campus-operations" },
-  { name: "Granite Industrial Partners", href: "/client-access/granite-industrial-partners" },
-  { name: "Horizon Utilities Network", href: "/client-access/horizon-utilities-network" },
-  { name: "Lighthouse Property Services", href: "/client-access/lighthouse-property-services" },
-  { name: "Northbridge Facilities Group", href: "/client-access/northbridge-facilities-group" },
-  { name: "Pioneer SiteWorks", href: "/client-access/pioneer-siteworks" },
-  { name: "RidgeLine Service Group", href: "/client-access/ridgeline-service-group" },
-  { name: "Sterling Compliance Systems", href: "/client-access/sterling-compliance-systems" },
-  { name: "Summit Field Solutions", href: "/client-access/summit-field-solutions" },
+  { name: "Accenture", href: "/client-access/accenture" },
+  { name: "CBRE", href: "/client-access/cbre" },
+  { name: "Cushman & Wakefield", href: "/client-access/cushman-wakefield" },
+  { name: "Deloitte", href: "/client-access/deloitte" },
+  { name: "Honeywell", href: "/client-access/honeywell" },
+  { name: "IBM", href: "/client-access/ibm" },
+  { name: "Johnson Controls", href: "/client-access/johnson-controls" },
+  { name: "Microsoft", href: "/client-access/microsoft" },
+  { name: "Oracle", href: "/client-access/oracle" },
+  { name: "SAP", href: "/client-access/sap" },
+  { name: "Schneider Electric", href: "/client-access/schneider-electric" },
+  { name: "ServiceNow", href: "/client-access/servicenow" },
+  { name: "Siemens", href: "/client-access/siemens" },
   { name: "Verde", href: "/verde" },
-  { name: "Westlake Commercial Services", href: "/client-access/westlake-commercial-services" }
+  { name: "Wipro", href: "/client-access/wipro" }
 ];
 
 export default function StartScopeFormPage() {
