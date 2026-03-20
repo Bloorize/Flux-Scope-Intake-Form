@@ -1067,7 +1067,7 @@ export function DiscoveryForm() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
   const [questionNotes, setQuestionNotes] = useState<QuestionNotesState>({});
-  const [isHeaderCondensed, setIsHeaderCondensed] = useState(false);
+  const isHeaderCondensed = false;
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
   const hasHydratedDraftRef = useRef(false);
@@ -1305,18 +1305,6 @@ export function DiscoveryForm() {
     }
     return Array.from(grouped.values()).sort((a, b) => a.sectionIndex - b.sectionIndex);
   }, [submissionWarnings]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const onScroll = () => {
-      setIsHeaderCondensed(window.scrollY > 48);
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || hasHydratedDraftRef.current) {
