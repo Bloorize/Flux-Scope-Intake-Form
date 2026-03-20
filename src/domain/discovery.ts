@@ -1141,10 +1141,10 @@ export type DiscoverySection = {
 export const discoverySections: DiscoverySection[] = [
   {
     id: "phase1",
-    title: "Phase 1 scope definition",
+    title: "Phase 1 launch scope",
     shortTitle: "Scope",
-    description: "Identify what must exist at launch and force concrete Day 1 behavior.",
-    prompt: "Capture only launch-critical capabilities, inspection evidence rules, and joint inspection expectations for Day 1.",
+    description: "Define what must be live on day one.",
+    prompt: "Focus on day-one features, inspection proof rules, and joint inspection expectations.",
     fieldPaths: [
       "phase1Scope.selectedFeatures",
       "phase1Scope.otherFeature",
@@ -1162,10 +1162,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "criticality",
-    title: "Criticality and failure impact",
+    title: "Business impact if the system is down",
     shortTitle: "Criticality",
-    description: "Force a concrete articulation of what breaks during a 24-hour outage.",
-    prompt: "List at least three consequences with affected actors and blocked work.",
+    description: "Spell out what stops when the system is unavailable for one day.",
+    prompt: "List at least three impacts and who is affected.",
     fieldPaths: ["criticality.consequences"],
     aiObjective: "Verify the outage impact explains exactly what fails, who is affected, and what work stops.",
     aiChecklist: [
@@ -1176,10 +1176,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "baseline",
-    title: "Current system baseline",
+    title: "Current tools and baseline",
     shortTitle: "Baseline",
-    description: "Separate current state, must-replace items, and deferrable scope.",
-    prompt: "Document the current systems, hierarchy constraints, and replacement boundary.",
+    description: "Separate current tools from what must be replaced now versus later.",
+    prompt: "List current systems, hierarchy needs, and replacement boundaries.",
     fieldPaths: [
       "currentBaseline.systemsToday",
       "currentBaseline.mustReplace",
@@ -1198,10 +1198,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "mobile",
-    title: "Mobile and native requirements",
+    title: "Mobile requirements",
     shortTitle: "Mobile",
-    description: "Justify native mobile needs with concrete platform constraints.",
-    prompt: "A native app must earn its complexity through explicit requirements.",
+    description: "Explain why mobile apps are needed and what they must do.",
+    prompt: "Describe the real business reasons for mobile, offline, and performance requirements.",
     fieldPaths: [
       "mobileRequirements.selectedReasons",
       "mobileRequirements.otherExplanation",
@@ -1218,10 +1218,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "offline",
-    title: "Offline requirements",
+    title: "Offline behavior",
     shortTitle: "Offline",
-    description: "Define whether offline support is needed and how synchronization should work.",
-    prompt: "State the exact workflows, sync model, and offline duration expectations.",
+    description: "Define whether offline support is needed and how syncing should work.",
+    prompt: "State key offline tasks, sync timing, and how long teams may be offline.",
     fieldPaths: ["offlineRequirements.supportLevel", "offlineRequirements.detail"],
     aiObjective: "Determine whether offline support is truly required and whether the sync model is clear enough.",
     aiChecklist: [
@@ -1234,8 +1234,8 @@ export const discoverySections: DiscoverySection[] = [
     id: "integrations",
     title: "Launch integrations",
     shortTitle: "Integrations",
-    description: "Specify every launch integration and the required integration depth.",
-    prompt: "Identify only launch-critical systems and define sync operating model expectations.",
+    description: "Name every system that must connect at launch.",
+    prompt: "For each launch system, describe the connection depth and sync expectations.",
     fieldPaths: [
       "integrations.selectedSystems",
       "integrations.otherSystem",
@@ -1253,10 +1253,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "analytics-ai",
-    title: "Analytics and AI expectations",
+    title: "Reporting and AI expectations",
     shortTitle: "Analytics",
-    description: "Separate Phase 1 deliverables from later analytics and AI ambitions.",
-    prompt: "Define concrete outputs, location health scoring logic, and manager/regional rollup expectations.",
+    description: "Separate phase 1 reporting needs from later AI ambitions.",
+    prompt: "Describe required dashboards, score logic, and executive summary needs.",
     fieldPaths: [
       "analyticsAi.analyticsPhase1",
       "analyticsAi.analyticsPhase2",
@@ -1274,10 +1274,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "workflows",
-    title: "Core workflows",
+    title: "Core day-to-day workflows",
     shortTitle: "Workflows",
-    description: "Capture the top three workflows used daily with actor, action, and outcome.",
-    prompt: "Use operational workflows and define launch work item, case routing, and safety execution rules.",
+    description: "Capture the most important daily workflows with who does what and why.",
+    prompt: "Describe core workflows, work item rules, case routing, and incident handling.",
     fieldPaths: [
       "workflows.topDailyWorkflows",
       "workflows.workItemUrgencyRules",
@@ -1296,10 +1296,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "scale",
-    title: "Users and scale",
+    title: "Users and expected scale",
     shortTitle: "Scale",
-    description: "Collect numeric operating assumptions needed for architecture and LOE.",
-    prompt: "Use exact numbers. Ranges and qualitative answers are rejected.",
+    description: "Collect the numbers needed to size the solution.",
+    prompt: "Use direct numbers for users, sites, and daily volume.",
     fieldPaths: [
       "scale.usersAtLaunch",
       "scale.usersIn12Months",
@@ -1317,8 +1317,8 @@ export const discoverySections: DiscoverySection[] = [
     id: "delivery",
     title: "Delivery expectations",
     shortTitle: "Delivery",
-    description: "Translate vague delivery language into concrete schedule and readiness criteria.",
-    prompt: "Define rapid deployment, production-ready, and support expectations in specific terms.",
+    description: "Turn broad delivery goals into clear timeline and readiness definitions.",
+    prompt: "Define timeline, production-ready criteria, support expectations, and tradeoffs.",
     fieldPaths: [
       "delivery.rapidDeploymentWeeks",
       "delivery.productionReadyDefinition",
@@ -1335,10 +1335,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "phase1-confirmation",
-    title: "Phased roadmap definition: Phase 1 confirmation",
+    title: "Phase 1 scope confirmation",
     shortTitle: "Phase 1 confirm",
-    description: "Confirm strict Phase 1 boundary and disclose any advanced analytics or AI expectations in Phase 1.",
-    prompt: "Verify that Phase 1 includes only the defined replacement scope.",
+    description: "Confirm what is in phase 1 and call out any advanced requests.",
+    prompt: "Verify that phase 1 includes only the agreed launch scope.",
     fieldPaths: [
       "phase1Confirmation.phase1OnlyConfirmed",
       "phase1Confirmation.advancedAiInPhase1",
@@ -1353,10 +1353,10 @@ export const discoverySections: DiscoverySection[] = [
   },
   {
     id: "phase2-roadmap",
-    title: "Phase 2 operational expansion",
+    title: "Phase 2 expansion",
     shortTitle: "Phase 2",
-    description: "Capture expansion capabilities that are intentionally outside immediate replacement scope.",
-    prompt: "Define what expands in Phase 2 and keep it distinct from Phase 1.",
+    description: "Capture capabilities that are intentionally planned for phase 2.",
+    prompt: "Define what expands in phase 2 and keep it separate from phase 1.",
     fieldPaths: [
       "phase2Roadmap.selectedAreas",
       "phase2Roadmap.noScopeDefined",
@@ -1377,8 +1377,8 @@ export const discoverySections: DiscoverySection[] = [
     id: "phase3-roadmap",
     title: "Phase 3 AI and predictive analytics",
     shortTitle: "Phase 3 AI",
-    description: "Define long-term AI capabilities with data readiness and expectation control.",
-    prompt: "Set realistic AI expectations with explicit data inputs, outputs, and measurable outcomes.",
+    description: "Define long-term AI capabilities with realistic data readiness assumptions.",
+    prompt: "Set realistic AI expectations with clear inputs, outputs, and measurable outcomes.",
     fieldPaths: [
       "phase3Roadmap.selectedCapabilities",
       "phase3Roadmap.otherCapability",

@@ -21,14 +21,10 @@ const payloadSchema = z.object({
 
 export async function POST(request: Request) {
   const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const body = await request.json();
   const payload = payloadSchema.parse(body);
   const supabase = getSupabaseServerClient();
-  const userEmail = await getCurrentUserEmail();
+  const userEmail = userId ? await getCurrentUserEmail() : null;
 
   if (!supabase) {
     return NextResponse.json(
@@ -61,17 +57,28 @@ export async function POST(request: Request) {
       .select("id, created_at")
       .single();
 
-  let { data, error } = await insertWithUserColumns();
+  let data: { id: string; created_at: string } | null = null;
+  let error: { message: string } | null = null;
 
-  const detail = error?.message ?? "";
-  const isMissingUserColumnError =
-    detail.includes("Could not find the 'user_email' column") || detail.includes("Could not find the 'user_id' column");
+  if (userId) {
+    const withUserResult = await insertWithUserColumns();
+    data = withUserResult.data;
+    error = withUserResult.error ? { message: withUserResult.error.message } : null;
 
-  if (error && isMissingUserColumnError) {
-    // Backward compatibility for older local schemas that do not yet have user columns.
-    const fallbackResult = await insertWithoutUserColumns();
-    data = fallbackResult.data;
-    error = fallbackResult.error;
+    const detail = error?.message ?? "";
+    const isMissingUserColumnError =
+      detail.includes("Could not find the 'user_email' column") || detail.includes("Could not find the 'user_id' column");
+
+    if (error && isMissingUserColumnError) {
+      // Backward compatibility for older local schemas that do not yet have user columns.
+      const fallbackResult = await insertWithoutUserColumns();
+      data = fallbackResult.data;
+      error = fallbackResult.error ? { message: fallbackResult.error.message } : null;
+    }
+  } else {
+    const anonymousResult = await insertWithoutUserColumns();
+    data = anonymousResult.data;
+    error = anonymousResult.error ? { message: anonymousResult.error.message } : null;
   }
 
   if (error) {

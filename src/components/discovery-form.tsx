@@ -102,6 +102,114 @@ const mergeWithDefaults = <T,>(defaults: T, candidate: unknown): T => {
   return merged as T;
 };
 
+const normalizeDraftText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const toDraftLines = (value: string) =>
+  value
+    .split(/\n+/)
+    .map((line) => line.replace(/^[\-\*\d\.\)\s]+/, "").trim())
+    .filter(Boolean);
+
+const splitDraftItems = (value: string) => {
+  const byLine = toDraftLines(value);
+  if (byLine.length > 1) {
+    return byLine;
+  }
+  return value
+    .split(/[;,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+};
+
+const matchSingleOption = (draft: string, options: ReadonlyArray<{ value: string; label: string }>) => {
+  const normalizedDraft = normalizeDraftText(draft);
+  if (!normalizedDraft) {
+    return undefined;
+  }
+
+  const directMatch = options.find((option) => {
+    const normalizedLabel = normalizeDraftText(option.label);
+    const normalizedValue = normalizeDraftText(option.value);
+    return (
+      normalizedDraft === normalizedLabel ||
+      normalizedDraft === normalizedValue ||
+      normalizedDraft.includes(normalizedLabel) ||
+      normalizedDraft.includes(normalizedValue)
+    );
+  });
+
+  if (directMatch) {
+    return directMatch.value;
+  }
+
+  const firstLine = toDraftLines(draft)[0];
+  if (!firstLine) {
+    return undefined;
+  }
+  const normalizedFirstLine = normalizeDraftText(firstLine);
+  const firstLineMatch = options.find((option) => {
+    const normalizedLabel = normalizeDraftText(option.label);
+    const normalizedValue = normalizeDraftText(option.value);
+    return normalizedFirstLine.includes(normalizedLabel) || normalizedFirstLine.includes(normalizedValue);
+  });
+  return firstLineMatch?.value;
+};
+
+const matchMultiOptions = (draft: string, options: ReadonlyArray<{ value: string; label: string }>) => {
+  const entries = splitDraftItems(draft);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const matchedValues = new Set<string>();
+  for (const entry of entries) {
+    const normalizedEntry = normalizeDraftText(entry);
+    if (!normalizedEntry) {
+      continue;
+    }
+    for (const option of options) {
+      const normalizedLabel = normalizeDraftText(option.label);
+      const normalizedValue = normalizeDraftText(option.value);
+      if (
+        normalizedEntry === normalizedLabel ||
+        normalizedEntry === normalizedValue ||
+        normalizedEntry.includes(normalizedLabel) ||
+        normalizedEntry.includes(normalizedValue)
+      ) {
+        matchedValues.add(option.value);
+      }
+    }
+  }
+
+  return Array.from(matchedValues);
+};
+
+const parseWorkflowDraft = (draft: string) => {
+  const lines = toDraftLines(draft).slice(0, 5);
+  return lines
+    .map((line) => {
+      const [left, right] = line.split(/->|=>|:/).map((part) => part.trim());
+      if (right) {
+        return {
+          actor: left || "Operations team",
+          action: right,
+          outcome: "Improve day-to-day execution."
+        };
+      }
+
+      const words = line.split(" ");
+      if (words.length < 4) {
+        return null;
+      }
+      return {
+        actor: words.slice(0, 2).join(" "),
+        action: words.slice(2).join(" "),
+        outcome: "Keep the process moving."
+      };
+    })
+    .filter((workflow): workflow is { actor: string; action: string; outcome: string } => workflow !== null);
+};
+
 const getErrorMessage = (
   errors: FieldErrors<DiscoveryValidatedValues>,
   path: string,
@@ -677,7 +785,7 @@ function WorkflowEditor({
   return (
     <FieldShell
       ai={ai}
-      label="Top 3 workflows used daily"
+      label="Top 3 workflows used each day"
       explanation="Each workflow must specify the actor, the exact action, and the business outcome."
       example="Site supervisor assigns an inspection route by building and floor, inspector captures room-level findings with photos, and regional manager reviews same-day exception alerts to trigger corrective work items."
       error={getErrorMessage(errors, "workflows.topDailyWorkflows")}
@@ -959,6 +1067,7 @@ export function DiscoveryForm() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
   const [questionNotes, setQuestionNotes] = useState<QuestionNotesState>({});
+  const [isHeaderCondensed, setIsHeaderCondensed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
   const hasHydratedDraftRef = useRef(false);
@@ -1198,6 +1307,18 @@ export function DiscoveryForm() {
   }, [submissionWarnings]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const onScroll = () => {
+      setIsHeaderCondensed(window.scrollY > 48);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined" || hasHydratedDraftRef.current) {
       return;
     }
@@ -1435,6 +1556,63 @@ export function DiscoveryForm() {
     }
   };
 
+  const applyDraftToField = (fieldPath: string, draft: string, answer: unknown) => {
+    const setFieldValue = (nextValue: unknown) => {
+      form.setValue(fieldPath as Path<DiscoveryValidatedValues>, nextValue as never, {
+        shouldDirty: true,
+        shouldValidate: true
+      });
+      return true;
+    };
+
+    const singleSelectOptionsByPath: Record<string, ReadonlyArray<{ value: string; label: string }>> = {
+      "phase1Scope.inspectionScoringMethod": inspectionScoringMethodOptions,
+      "currentBaseline.mirrorApproach": mirrorApproachOptions,
+      "currentBaseline.hierarchyRequirement": hierarchyRequirementOptions,
+      "currentBaseline.spaceTypeGovernance": spaceTypeGovernanceOptions,
+      "offlineRequirements.supportLevel": offlineSupportOptions,
+      "integrations.adpSyncMode": adpSyncModeOptions,
+      "integrations.powerBiMode": powerBiModeOptions
+    };
+
+    const multiSelectOptionsByPath: Record<string, ReadonlyArray<{ value: string; label: string }>> = {
+      "phase1Scope.selectedFeatures": phase1FeatureOptions,
+      "mobileRequirements.selectedReasons": mobileReasonOptions,
+      "integrations.selectedSystems": integrationSystemOptions
+    };
+
+    const singleOptions = singleSelectOptionsByPath[fieldPath];
+    if (singleOptions) {
+      const matchedValue = matchSingleOption(draft, singleOptions);
+      if (matchedValue) {
+        return setFieldValue(matchedValue);
+      }
+    }
+
+    const multiOptions = multiSelectOptionsByPath[fieldPath];
+    if (multiOptions) {
+      const matchedValues = matchMultiOptions(draft, multiOptions);
+      if (matchedValues.length > 0) {
+        return setFieldValue(matchedValues);
+      }
+    }
+
+    if (fieldPath === "workflows.topDailyWorkflows") {
+      const workflows = parseWorkflowDraft(draft);
+      if (workflows.length > 0) {
+        return setFieldValue(workflows);
+      }
+    }
+
+    if (typeof answer === "string") {
+      return setFieldValue(draft);
+    }
+    if (Array.isArray(answer)) {
+      return setFieldValue(splitDraftItems(draft));
+    }
+    return false;
+  };
+
   const getQuestionAiProps = (
     fieldPath: string,
     questionLabel: string,
@@ -1453,11 +1631,26 @@ export function DiscoveryForm() {
     },
     onApplyDraft: () => {
       const draft = questionAiState[fieldPath]?.draft?.trim();
-      if (!draft || !applyDraft) {
+      if (!draft) {
         return;
       }
 
-      applyDraft(draft);
+      const applied = applyDraft ? (applyDraft(draft), true) : applyDraftToField(fieldPath, draft, answer);
+      if (!applied) {
+        setQuestionState(fieldPath, (current) => ({
+          ...current,
+          error: "This draft could not be applied automatically. You can still copy and paste it.",
+          updatedAt: new Date().toISOString()
+        }));
+        return;
+      }
+
+      setQuestionState(fieldPath, (current) => ({
+        ...current,
+        draft: undefined,
+        error: undefined,
+        updatedAt: new Date().toISOString()
+      }));
       void runQuestionReview(fieldPath, questionLabel, draft);
     }
   });
@@ -1641,16 +1834,21 @@ export function DiscoveryForm() {
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(13,76,129,0.16),_transparent_30%),linear-gradient(180deg,#f7f8fb_0%,#edf2f7_100%)] px-4 py-10 md:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <Card className="overflow-hidden">
-          <CardHeader className="border-b border-[var(--border)] bg-white/80 backdrop-blur">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-4">
+          <CardHeader
+            className={cn(
+              "sticky top-0 z-30 border-b border-[var(--border)] bg-white/90 backdrop-blur transition-all duration-200",
+              isHeaderCondensed ? "py-3" : "py-6"
+            )}
+          >
+            <div className={cn("transition-all duration-200", isHeaderCondensed ? "space-y-2" : "space-y-4")}>
+              <div className={cn("flex flex-wrap items-center transition-all duration-200", isHeaderCondensed ? "gap-2" : "gap-4")}>
                 <div className="rounded-xl border border-[var(--border)] bg-white px-3 py-2">
                   <Image
                     src={ruxtonLogo}
                     alt="Ruxton Labs logo"
                     width={300}
                     height={64}
-                    className="h-16 w-auto object-contain"
+                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-16")}
                     priority
                   />
                 </div>
@@ -1660,22 +1858,41 @@ export function DiscoveryForm() {
                     alt="Verde Clean logo"
                     width={300}
                     height={64}
-                    className="h-16 w-auto object-contain"
+                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-16")}
                     priority
                   />
                 </div>
-                <div className="rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-sm text-[var(--muted-foreground)]">
+                <div
+                  className={cn(
+                    "rounded-full border border-[var(--border)] bg-white text-[var(--muted-foreground)] transition-all duration-200",
+                    isHeaderCondensed ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm"
+                  )}
+                >
                   HeySage Intelligent Operations Platform
                 </div>
               </div>
               <div>
-                <h1 className="text-3xl font-semibold tracking-tight text-[var(--foreground)] md:text-4xl">Scope Clarification Questionnaire</h1>
-                <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
-                  Answer each prompt in plain language. AI suggestions help improve quality, but you can always proceed.
-                </p>
+                <h1
+                  className={cn(
+                    "font-semibold tracking-tight text-[var(--foreground)] transition-all duration-200",
+                    isHeaderCondensed ? "text-xl md:text-2xl" : "text-3xl md:text-4xl"
+                  )}
+                >
+                  Scope Clarification Questionnaire
+                </h1>
+                {!isHeaderCondensed ? (
+                  <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
+                    Answer each prompt in plain language. AI suggestions help improve quality, but you can always proceed.
+                  </p>
+                ) : null}
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+              <div className={cn("space-y-2 transition-all duration-200", isHeaderCondensed ? "pt-1" : "")}>
+                <div
+                  className={cn(
+                    "flex items-center justify-between text-[var(--muted-foreground)] transition-all duration-200",
+                    isHeaderCondensed ? "text-[11px] uppercase tracking-[0.12em]" : "text-xs uppercase tracking-[0.16em]"
+                  )}
+                >
                   {entryStage === "questions" ? (
                     <>
                       <span>Overall progress</span>
@@ -1704,13 +1921,12 @@ export function DiscoveryForm() {
                   <>
                     <h2 className="text-2xl font-semibold text-[var(--foreground)]">Welcome to the Ruxton Labs Guided Scope Intake Wizard</h2>
                     <p className="text-sm leading-7 text-[var(--muted-foreground)]">
-                      This experience helps you clarify launch scope, risks, and phased roadmap decisions for the HeySage Intelligent Operations
-                      Platform.
+                      This walkthrough helps us confirm what must be delivered first, what can wait, and what decisions still need input.
                     </p>
                     <ul className="space-y-2 text-sm leading-6 text-[var(--foreground)]">
-                      <li>- Expect roughly 12 to 18 minutes to complete.</li>
-                      <li>- You will answer one question at a time with optional AI coaching.</li>
-                      <li>- Your answers become a structured scope output for planning and delivery.</li>
+                      <li>- Most people finish in about 12 to 18 minutes.</li>
+                      <li>- You will answer one question at a time with optional AI writing help.</li>
+                      <li>- Your answers are turned into a clear scope record for planning and delivery.</li>
                     </ul>
                   </>
                 ) : null}
@@ -1720,19 +1936,16 @@ export function DiscoveryForm() {
                     <h2 className="text-2xl font-semibold text-[var(--foreground)]">Current Understanding of Scope</h2>
                     <div className="space-y-3 text-sm leading-6 text-[var(--foreground)]">
                       <p>
-                        Ruxton Labs already understands this program as an operations-critical modernization effort for the HeySage Intelligent Operations Platform.
-                        Phase 1 must protect day-to-day execution by delivering dependable inspection workflows, corrective work item routing, and dashboard visibility for
-                        frontline supervisors, regional operators, and executive stakeholders.
+                        Ruxton Labs currently understands this as a business-critical modernization effort for the HeySage Intelligent Operations Platform.
+                        Phase 1 should protect daily operations by delivering dependable inspections, clear corrective work routing, and reporting visibility for frontline teams and leadership.
                       </p>
                       <p>
-                        We also see clear complexity signals: native mobile expectations, offline usage windows, role-aware organizational hierarchy requirements,
-                        and launch integrations (especially ADP, Power BI, and internal systems) that require explicit data contracts and latency rules before delivery
-                        planning can be trusted.
+                        We also see a few high-risk areas that need clear decisions now: mobile expectations, offline use, location hierarchy rules,
+                        and launch integrations (especially ADP, Power BI, and internal systems).
                       </p>
                       <p>
-                        The phased roadmap is directionally sound. Phase 2 should expand operational modules once Phase 1 adoption is stable, while Phase 3 AI capabilities
-                        should be gated by data readiness, governance ownership, and measurable success criteria. This questionnaire is focused on converting that direction
-                        into concrete implementation decisions, not re-discovering first principles.
+                        The roadmap direction looks right: stabilize core operations in phase 1, expand in phase 2, and layer in advanced AI in phase 3.
+                        This questionnaire turns that direction into practical delivery decisions.
                       </p>
                     </div>
                   </>
@@ -1740,19 +1953,16 @@ export function DiscoveryForm() {
 
                 {entryStage === "blind-spots" ? (
                   <>
-                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">Blind spot analysis</h2>
+                    <h2 className="text-2xl font-semibold text-[var(--foreground)]">Blind spot review</h2>
                     <div className="space-y-3 text-sm leading-6 text-[var(--foreground)]">
                       <p>
-                        1) Day 1 boundaries often expand late when stakeholders describe \"must-have\" outcomes without actor-level workflows. We will pressure-test every
-                        selected launch feature to prevent Phase 2/3 scope from bleeding into Phase 1.
+                        1) Day-one boundaries often expand late. We will pressure-test each launch feature so later-phase work does not quietly slip into phase 1.
                       </p>
                       <p>
-                        2) Mobile and offline expectations can be underspecified. We need explicit offline duration, sync cadence, conflict handling ownership, and
-                        platform-distribution constraints so architecture and QA planning are realistic.
+                        2) Mobile and offline expectations are often underspecified. We need clear answers on offline duration, sync timing, and who handles conflicts.
                       </p>
                       <p>
-                        3) Integration complexity is commonly hidden in the details. For each launch system, we need depth, data direction, latency tolerance, and
-                        operational fallback behavior to size delivery risk accurately.
+                        3) Integration complexity is usually hidden in details. For each launch system, we need clear data flow, timing expectations, and fallback behavior.
                       </p>
                     </div>
                   </>
@@ -1790,7 +2000,7 @@ export function DiscoveryForm() {
                           "What exact features must exist on Day 1 for operations to function?",
                           values.phase1Scope.selectedFeatures
                         )}
-                        label="What exact features must exist on Day 1 for operations to function?"
+                        label="What features are absolutely needed on day one?"
                         explanation="Select only the capabilities that must be live on launch day. Each selected feature requires a detailed Day 1 behavior statement."
                         example="Day 1 must include inspections, work items, cases, and dashboards so supervisors can run shift checks, managers can assign corrective actions, and leaders can view location health before close of business."
                         error={getErrorMessage(form.formState.errors, "phase1Scope.selectedFeatures")}
@@ -1839,7 +2049,7 @@ export function DiscoveryForm() {
                             values.phase1Scope.otherFeature,
                             (draft) => form.setValue("phase1Scope.otherFeature", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Describe the additional Day 1 capability"
+                          label="Describe the other day-one feature"
                           explanation="Explain what the custom Day 1 feature is. Avoid category words alone."
                           example="Permit approval workflow where site leads submit permit requests, regional safety managers approve or reject with comments, and approved permits notify the assigned field team within 15 minutes."
                           error={getErrorMessage(form.formState.errors, "phase1Scope.otherFeature")}
@@ -1883,7 +2093,7 @@ export function DiscoveryForm() {
                           values.phase1Scope.failEvidenceStandard,
                           (draft) => form.setValue("phase1Scope.failEvidenceStandard", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What evidence is mandatory for failed inspection points?"
+                        label="What proof is required when an inspection fails?"
                         explanation="Define whether photos, comments, and reason codes are required before scoring and submission."
                         example="Each failed point requires at least one photo, a written comment, and a standardized reason code before the room can be submitted or routed for corrective work."
                         error={getErrorMessage(form.formState.errors, "phase1Scope.failEvidenceStandard")}
@@ -1898,7 +2108,7 @@ export function DiscoveryForm() {
                           values.phase1Scope.jointInspectionExpectation,
                           (draft) => form.setValue("phase1Scope.jointInspectionExpectation", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What joint inspection expectation exists by account?"
+                        label="How often should joint inspections happen with each customer account?"
                         explanation="State expected cadence, who attends, and what happens when cadence is missed."
                         example="Joint inspections are required monthly per site with customer POC attendance; any missed month creates a manager follow-up case and appears in dashboard exceptions."
                         error={getErrorMessage(form.formState.errors, "phase1Scope.jointInspectionExpectation")}
@@ -1924,7 +2134,7 @@ export function DiscoveryForm() {
                             { shouldDirty: true, shouldValidate: true }
                           )
                       )}
-                      label="If the system is down for 24 hours, what breaks?"
+                      label="If the system is down for 24 hours, what stops working?"
                       explanation="List specific workflows, who is affected, and what cannot be done. At least three consequences are required."
                       example="Supervisors cannot launch inspections by building and floor, field teams cannot submit failed room photos or reason codes, and regional leaders lose same-day visibility into high-risk sites and overdue corrective actions."
                       minItems={3}
@@ -1951,7 +2161,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What system(s) are you using today?"
+                        label="What systems do you use today?"
                         explanation="List named systems, spreadsheets, portals, or manual processes currently used."
                         example="Supervisors use ADP for team roster and site assignment data, managers track inspections in SharePoint lists, and regional reporting is compiled weekly in Power BI plus exported Excel files."
                         minItems={1}
@@ -1974,7 +2184,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What EXACTLY must be replaced?"
+                        label="What must be replaced right away?"
                         explanation="List specific workflows, modules, or data processes that cannot remain in the legacy environment."
                         example="Replace paper inspection checklists with room-level mobile scoring, replace email-based issue assignment with tracked work items, and replace manual complaint logs with case lifecycle tracking."
                         minItems={2}
@@ -1997,7 +2207,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What can be deferred?"
+                        label="What can wait until later?"
                         explanation="List items that are useful but not required for Phase 1 operations."
                         example="Historical migration older than 12 months, advanced executive benchmarking packs, and non-critical custom report exports can be deferred to Phase 2 without impacting launch operations."
                         minItems={1}
@@ -2011,7 +2221,7 @@ export function DiscoveryForm() {
                           "Current app strategy",
                           values.currentBaseline.mirrorApproach
                         )}
-                        label="Current app strategy"
+                        label="How should we handle the current app?"
                         explanation="Choose whether Phase 1 should mirror the current app or intentionally diverge."
                         example="Modernize: keep the same frontline inspection flow and score logic for adoption, but redesign manager dashboards and case routing so accountability is clearer and faster."
                         error={getErrorMessage(form.formState.errors, "currentBaseline.mirrorApproach")}
@@ -2039,7 +2249,7 @@ export function DiscoveryForm() {
                           "Is the Org -> Region -> Site -> Building -> Floor -> Space hierarchy mandatory at launch?",
                           values.currentBaseline.hierarchyRequirement
                         )}
-                        label="Is the Org -> Region -> Site -> Building -> Floor -> Space hierarchy mandatory at launch?"
+                        label="Do you need the full location hierarchy at launch (org, region, site, building, floor, space)?"
                         explanation="Choose whether this hierarchy must be fully enforced in Phase 1."
                         example="Required at launch because inspections, work items, and dashboard rollups all depend on accurate site-to-space context."
                         error={getErrorMessage(form.formState.errors, "currentBaseline.hierarchyRequirement")}
@@ -2067,7 +2277,7 @@ export function DiscoveryForm() {
                           "How should space types and inspection points be governed?",
                           values.currentBaseline.spaceTypeGovernance
                         )}
-                        label="How should space types and inspection points be governed?"
+                        label="Who should control space types and inspection points?"
                         explanation="Select whether definitions are global, site-managed, or a hybrid with controlled overrides."
                         example="Hybrid governance with global standards for core space types and site-level overrides for customer-specific rooms like labs, courts, or clinical spaces."
                         error={getErrorMessage(form.formState.errors, "currentBaseline.spaceTypeGovernance")}
@@ -2099,7 +2309,7 @@ export function DiscoveryForm() {
                           "Why do you believe native mobile apps are required?",
                           values.mobileRequirements.selectedReasons
                         )}
-                        label="Why do you believe native mobile apps are required?"
+                        label="Why do you need mobile apps instead of only a web app?"
                         explanation="Select the operational reasons that justify native app complexity."
                         example="Inspectors work in low-connectivity mechanical rooms, must capture photos and scores quickly with minimal typing, and need near-instant task switching between inspections and corrective work items during active shifts."
                         error={getErrorMessage(form.formState.errors, "mobileRequirements.selectedReasons")}
@@ -2130,7 +2340,7 @@ export function DiscoveryForm() {
                             values.mobileRequirements.otherExplanation,
                             (draft) => form.setValue("mobileRequirements.otherExplanation", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Explain the other native mobile reason"
+                          label="Explain the other mobile app reason"
                           explanation="State the operating constraint that makes a web experience insufficient."
                           example="Devices are managed under strict MDM kiosk mode, so the team needs controlled camera access, background upload retries, and push alert handling that browser tabs cannot reliably provide."
                           error={getErrorMessage(form.formState.errors, "mobileRequirements.otherExplanation")}
@@ -2147,7 +2357,7 @@ export function DiscoveryForm() {
                             values.mobileRequirements.offlineDetail,
                             (draft) => form.setValue("mobileRequirements.offlineDetail", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Describe EXACT offline requirements"
+                          label="Describe your offline needs"
                           explanation="Must state what actions happen offline and how long users are expected to remain offline."
                           example="Inspectors must create and complete inspections offline, record fail reasons, capture photos, and close urgent work items for up to 8 hours offline before queued sync runs when they reconnect."
                           error={getErrorMessage(form.formState.errors, "mobileRequirements.offlineDetail")}
@@ -2163,7 +2373,7 @@ export function DiscoveryForm() {
                             "Is TestFlight or internal distribution acceptable?",
                             values.mobileRequirements.appStoreInternalDistributionOk
                           )}
-                          label="Is TestFlight or internal distribution acceptable?"
+                          label="Is internal app distribution acceptable (like TestFlight)?"
                           explanation="Choose yes only if App Store review is not a hard requirement."
                           example="No. Public App Store distribution is required because customer-side stakeholders download the app directly and cannot use internal enterprise distribution channels."
                           error={getErrorMessage(form.formState.errors, "mobileRequirements.appStoreInternalDistributionOk")}
@@ -2197,7 +2407,7 @@ export function DiscoveryForm() {
                             values.mobileRequirements.performanceDetail,
                             (draft) => form.setValue("mobileRequirements.performanceDetail", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Describe specific performance issues expected"
+                          label="Describe any performance issues you expect"
                           explanation="Name the slow workflows or device demands expected from the product."
                           example="The app must load 200-checkpoint inspection templates in under 2 seconds, open camera capture in under 1 second, and save findings without UI lag on managed Android and iOS devices."
                           error={getErrorMessage(form.formState.errors, "mobileRequirements.performanceDetail")}
@@ -2216,7 +2426,7 @@ export function DiscoveryForm() {
                           "Does the platform need to function without internet?",
                           values.offlineRequirements.supportLevel
                         )}
-                        label="Does the platform need to function without internet?"
+                        label="Does the platform need to work without internet?"
                         explanation="Choose the minimum level of offline support required for operations."
                         example="Limited functionality: field teams must continue inspections and photo capture during short outages, then sync queued updates when connectivity is restored at the site."
                         error={getErrorMessage(form.formState.errors, "offlineRequirements.supportLevel")}
@@ -2245,7 +2455,7 @@ export function DiscoveryForm() {
                             values.offlineRequirements.detail,
                             (draft) => form.setValue("offlineRequirements.detail", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Describe the offline workflows, sync behavior, and expected frequency"
+                          label="Describe offline work, when data syncs, and how often"
                           explanation="State what users do offline, how sync occurs, and how often the app must reconcile data."
                           example="Supervisors and inspectors complete inspections and work items for up to 4 hours offline, then sync every 15 minutes when online, with conflict review routed to managers before final status updates publish."
                           error={getErrorMessage(form.formState.errors, "offlineRequirements.detail")}
@@ -2264,7 +2474,7 @@ export function DiscoveryForm() {
                           "What systems must integrate at launch?",
                           values.integrations.selectedSystems
                         )}
-                        label="What systems must integrate at launch?"
+                        label="Which systems must connect at launch?"
                         explanation="Select only the integrations required for launch."
                         example="ADP for employee and role sync is required at launch, and internal location master data is required so every inspection maps correctly to site, building, floor, and space."
                         error={getErrorMessage(form.formState.errors, "integrations.selectedSystems")}
@@ -2293,7 +2503,7 @@ export function DiscoveryForm() {
                             values.integrations.otherSystem,
                             (draft) => form.setValue("integrations.otherSystem", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Name the other launch integration"
+                          label="Name the other system to connect at launch"
                           explanation="Use the system name, not a generic category."
                           example="Salesforce Service Cloud case feed"
                           error={getErrorMessage(form.formState.errors, "integrations.otherSystem")}
@@ -2347,7 +2557,7 @@ export function DiscoveryForm() {
                           "How should ADP employee data sync into this platform?",
                           values.integrations.adpSyncMode
                         )}
-                        label="How should ADP employee data sync into this platform?"
+                        label="How should ADP employee data sync with this platform?"
                         explanation="Select sync mode and then define acceptable latency for role/site updates."
                         example="Nightly batch sync is acceptable for roster updates, but role changes must be corrected within two hours for shift assignment accuracy."
                         error={getErrorMessage(form.formState.errors, "integrations.adpSyncMode")}
@@ -2376,7 +2586,7 @@ export function DiscoveryForm() {
                           values.integrations.adpLatencyTolerance,
                           (draft) => form.setValue("integrations.adpLatencyTolerance", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What ADP sync latency is acceptable operationally?"
+                        label="How quickly does ADP data need to appear in this system?"
                         explanation="Describe tolerance for stale employee data and when manual correction is required."
                         example="Roster data can lag up to 24 hours, but site transfers and terminations must be reflected the same day to prevent assignment and access errors."
                         error={getErrorMessage(form.formState.errors, "integrations.adpLatencyTolerance")}
@@ -2390,7 +2600,7 @@ export function DiscoveryForm() {
                           "How will Power BI be used in Phase 1?",
                           values.integrations.powerBiMode
                         )}
-                        label="How will Power BI be used in Phase 1?"
+                        label="How will Power BI be used in phase 1?"
                         explanation="Choose whether Power BI is view-only, data-sync integrated, or both."
                         example="Both: leadership uses read-only Power BI dashboards while a governed data sync publishes curated inspection and work-item metrics nightly."
                         error={getErrorMessage(form.formState.errors, "integrations.powerBiMode")}
@@ -2428,7 +2638,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What analytics must exist at launch?"
+                        label="What reporting must be available at launch?"
                         explanation="List concrete dashboards, metrics, or exports needed in Phase 1."
                         example="Managers need a daily dashboard showing inspection score by site, unresolved work item aging over 48 hours, case volume by type, and coverage rate by shift."
                         minItems={1}
@@ -2448,7 +2658,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What analytics can wait until Phase 2+?"
+                        label="What reporting can wait until later phases?"
                         explanation="Separate later-stage reporting from launch necessities."
                         example="Executive trend forecasting, manager scorecards across regions, and quarter-over-quarter benchmarking by customer segment can wait until Phase 2."
                         minItems={1}
@@ -2468,7 +2678,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What AI capabilities are expected in Phase 1?"
+                        label="What AI features are expected in phase 1?"
                         explanation="Describe concrete outputs only. If none are required in Phase 1, say so explicitly with a scoped reason."
                         example="Phase 1 includes no predictive AI; only optional draft summarization of long incident comments is allowed to reduce typing while approval remains fully human."
                         minItems={1}
@@ -2488,7 +2698,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="What AI capabilities belong in Phase 2+?"
+                        label="What AI features belong in later phases?"
                         explanation="List the specific decision support or automation outcomes expected later."
                         example="Phase 2+ should suggest likely root cause categories, recommend next-best actions from historical outcomes, and flag locations likely to miss inspection quality thresholds."
                         minItems={1}
@@ -2504,7 +2714,7 @@ export function DiscoveryForm() {
                           values.analyticsAi.locationHealthScoringModel,
                           (draft) => form.setValue("analyticsAi.locationHealthScoringModel", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="How is location health score calculated?"
+                        label="How should location health be scored?"
                         explanation="Define score components, weighting logic, and what conditions reduce the score."
                         example="Location health starts at 100 and subtracts weighted penalties for overdue work items, missed joint inspections, and unresolved incidents; score changes are published daily with reason tags."
                         error={getErrorMessage(form.formState.errors, "analyticsAi.locationHealthScoringModel")}
@@ -2519,7 +2729,7 @@ export function DiscoveryForm() {
                           values.analyticsAi.managementRollupExpectations,
                           (draft) => form.setValue("analyticsAi.managementRollupExpectations", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What rollups do managers, regional leaders, and executives need?"
+                        label="What summary views do managers and leaders need?"
                         explanation="Describe who sees which KPI rollups and how often they act on them."
                         example="Site managers need daily exception views, regional leaders need weekly trend rollups by portfolio, and executives need monthly enterprise comparisons with top risk sites highlighted."
                         error={getErrorMessage(form.formState.errors, "analyticsAi.managementRollupExpectations")}
@@ -2545,7 +2755,7 @@ export function DiscoveryForm() {
                           values.workflows.workItemUrgencyRules,
                           (draft) => form.setValue("workflows.workItemUrgencyRules", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What work item urgency and aging rules apply at launch?"
+                        label="What urgency and aging rules should work items follow at launch?"
                         explanation="Define when work items are required, urgency levels, and overdue thresholds."
                         example="Any room score below 3.0 requires a work item, critical issues are due same day, and items older than 24 hours overdue trigger daily manager escalation."
                         error={getErrorMessage(form.formState.errors, "workflows.workItemUrgencyRules")}
@@ -2559,7 +2769,7 @@ export function DiscoveryForm() {
                           values.workflows.assigneeNotificationEscalation,
                           (draft) => form.setValue("workflows.assigneeNotificationEscalation", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="How should assignee notifications and overdue escalation behave?"
+                        label="How should reminders and overdue escalations work?"
                         explanation="Describe who gets notified and when escalation expands beyond the assignee."
                         example="Assignees receive immediate mobile alerts, supervisors get reminders before due time, and unresolved overdue items escalate to regional leaders after 24 hours."
                         error={getErrorMessage(form.formState.errors, "workflows.assigneeNotificationEscalation")}
@@ -2593,7 +2803,7 @@ export function DiscoveryForm() {
                           values.workflows.caseRoutingModel,
                           (draft) => form.setValue("workflows.caseRoutingModel", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="How should cases route between location and department ownership?"
+                        label="How should cases move between location and department owners?"
                         explanation="Define routing rules for location-owned cases versus centralized department cases."
                         example="Customer-facing complaints route to location owners, while safety and HR cases route to departments with centralized closeout controls and audit trail visibility."
                         error={getErrorMessage(form.formState.errors, "workflows.caseRoutingModel")}
@@ -2607,7 +2817,7 @@ export function DiscoveryForm() {
                           values.workflows.publicSafetyPortalScope,
                           (draft) => form.setValue("workflows.publicSafetyPortalScope", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What must the no-login public safety portal include?"
+                        label="What should the public safety portal include (no login)?"
                         explanation="Specify required resources and forms available without authentication."
                         example="No-login portal includes SDS sheets in multiple languages, insurance resources, incident response guidance, and QR-driven incident intake submission."
                         error={getErrorMessage(form.formState.errors, "workflows.publicSafetyPortalScope")}
@@ -2621,7 +2831,7 @@ export function DiscoveryForm() {
                           values.workflows.incidentComplianceFlow,
                           (draft) => form.setValue("workflows.incidentComplianceFlow", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What incident compliance flow is required?"
+                        label="What incident and compliance flow is required?"
                         explanation="Capture required intake steps from incident report through EHS closure."
                         example="Supervisor files intake immediately, nurse line triage is documented, reportability is reviewed by EHS, and case status remains open until all follow-up actions are complete."
                         error={getErrorMessage(form.formState.errors, "workflows.incidentComplianceFlow")}
@@ -2696,7 +2906,7 @@ export function DiscoveryForm() {
                           "What does rapid deployment mean in weeks?",
                           values.delivery.rapidDeploymentWeeks
                         )}
-                        label="What does rapid deployment mean in weeks?"
+                        label="How many weeks should phase 1 take?"
                         explanation="Translate 'rapid' into an explicit number."
                         example="12"
                         error={getErrorMessage(form.formState.errors, "delivery.rapidDeploymentWeeks")}
@@ -2710,7 +2920,7 @@ export function DiscoveryForm() {
                           values.delivery.productionReadyDefinition,
                           (draft) => form.setValue("delivery.productionReadyDefinition", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What defines production-ready?"
+                        label="How do you define 'production-ready'?"
                         explanation="State measurable criteria such as uptime expectations, roles, auditability, training, or support coverage."
                         example="Production-ready means all launch sites have validated role access, inspection and work-item flows pass UAT, audit logs are active, core dashboards are live, and Sev-1 support coverage is staffed for go-live."
                         error={getErrorMessage(form.formState.errors, "delivery.productionReadyDefinition")}
@@ -2724,7 +2934,7 @@ export function DiscoveryForm() {
                           values.delivery.supportLevel,
                           (draft) => form.setValue("delivery.supportLevel", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What support level is expected?"
+                        label="What support level do you expect after launch?"
                         explanation="Specify response times, support channels, and ownership model."
                         example="Field users need in-app and phone support 6am-8pm local time, Sev-1 incidents require engineering response within 30 minutes, and Sev-2 issues require resolution plans within one business day."
                         error={getErrorMessage(form.formState.errors, "delivery.supportLevel")}
@@ -2737,7 +2947,7 @@ export function DiscoveryForm() {
                           "Priority tradeoff for Phase 1",
                           values.delivery.priorityTradeoff
                         )}
-                        label="Priority tradeoff for Phase 1"
+                        label="What is the top priority for phase 1?"
                         explanation="Choose the primary decision lens if tradeoffs are required."
                         example="Quality first: preserve inspection accuracy, auditability, and reliability even if lower-priority enhancements move to Phase 2."
                         error={getErrorMessage(form.formState.errors, "delivery.priorityTradeoff")}
@@ -2769,7 +2979,7 @@ export function DiscoveryForm() {
                           "Confirm that Phase 1 includes ONLY the features already defined",
                           values.phase1Confirmation.phase1OnlyConfirmed
                         )}
-                        label="Confirm that Phase 1 includes ONLY the features already defined"
+                        label="Confirm that phase 1 includes only the features already listed"
                         explanation="If you select No, go back and adjust Phase 1 scope before continuing."
                         example="Yes, confirmed. Phase 1 includes inspections, work items, cases, and dashboards only; training automation, equipment management, and predictive analytics remain out of scope."
                         error={getErrorMessage(form.formState.errors, "phase1Confirmation.phase1OnlyConfirmed")}
@@ -2800,7 +3010,7 @@ export function DiscoveryForm() {
                           "Are you expecting ANY advanced analytics or AI in Phase 1?",
                           values.phase1Confirmation.advancedAiInPhase1
                         )}
-                        label="Are you expecting ANY advanced analytics or AI in Phase 1?"
+                        label="Are you expecting advanced reporting or AI in phase 1?"
                         explanation="Selecting yes marks this as high risk and requires a concrete explanation."
                         example="No. Phase 1 will use standard operational dashboards only, and predictive scoring will be planned for a later phase after data quality is proven."
                         error={getErrorMessage(form.formState.errors, "phase1Confirmation.advancedAiInPhase1")}
@@ -2833,7 +3043,7 @@ export function DiscoveryForm() {
                             values.phase1Confirmation.advancedAiExplanation,
                             (draft) => form.setValue("phase1Confirmation.advancedAiExplanation", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Explain the advanced analytics/AI expectation in Phase 1"
+                          label="Explain what advanced reporting or AI is needed in phase 1"
                           explanation="Be explicit about what model output is required, who uses it, and how it changes workflows."
                           example="Input is inspection failures and unresolved work-item age, output is a daily risk-priority queue, and user action is manager reassignment of top-risk sites before the next shift."
                           error={getErrorMessage(form.formState.errors, "phase1Confirmation.advancedAiExplanation")}
@@ -2852,7 +3062,7 @@ export function DiscoveryForm() {
                           "Which capabilities should be included in Phase 2?",
                           values.phase2Roadmap.selectedAreas
                         )}
-                        label="Which capabilities should be included in Phase 2?"
+                        label="Which capabilities should be included in phase 2?"
                         explanation='Select one or more areas, or explicitly mark "No Phase 2 scope defined."'
                         example="Select work item enhancements, training management, and communication tools for Phase 2 while keeping these out of launch scope to protect Phase 1 delivery."
                         error={getErrorMessage(form.formState.errors, "phase2Roadmap.selectedAreas")}
@@ -2895,7 +3105,7 @@ export function DiscoveryForm() {
                             values.phase2Roadmap.otherArea,
                             (draft) => form.setValue("phase2Roadmap.otherArea", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Describe the other Phase 2 area"
+                          label="Describe the other phase 2 area"
                           explanation="Name the area explicitly."
                           example="Customer-facing SLA exception portal with acknowledgment tracking"
                           error={getErrorMessage(form.formState.errors, "phase2Roadmap.otherArea")}
@@ -2933,7 +3143,7 @@ export function DiscoveryForm() {
                               "Is this REQUIRED for Phase 1?",
                               values.phase2Roadmap.details[area].requiredForPhase1
                             )}
-                            label="Is this REQUIRED for Phase 1?"
+                            label="Is this required in phase 1?"
                             explanation="Selecting Yes indicates scope bleed and requires explicit confirmation."
                             example="No for most items. Select Yes only when launch operations fail without this capability and the business accepts longer timeline and higher delivery risk."
                             error={getErrorMessage(form.formState.errors, `phase2Roadmap.details.${area}.requiredForPhase1`)}
@@ -2990,7 +3200,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="Rank your top Phase 2 priorities"
+                        label="Rank your top phase 2 priorities"
                         explanation="Provide at least top 3 in order (entry 1 = highest priority)."
                         example="1) Work item SLA automation, 2) Training assignments and certification tracking, 3) Team announcements with acknowledgment history."
                         minItems={3}
@@ -3005,7 +3215,7 @@ export function DiscoveryForm() {
                           "Expected timeline for Phase 2",
                           values.phase2Roadmap.expectedTimeline
                         )}
-                        label="Expected timeline for Phase 2"
+                        label="Expected timeline for phase 2"
                         explanation="Set clear expectation for when expansion work begins."
                         example="3-6 months after Phase 1 stabilization and baseline adoption metrics are met."
                         error={getErrorMessage(form.formState.errors, "phase2Roadmap.expectedTimeline")}
@@ -3033,7 +3243,7 @@ export function DiscoveryForm() {
                           "Which not-yet-launched modules are intentionally deferred to Phase 2?",
                           values.phase2Roadmap.deferredModules
                         )}
-                        label="Which not-yet-launched modules are intentionally deferred to Phase 2?"
+                        label="Which modules are intentionally deferred to phase 2?"
                         explanation="Select modules intentionally postponed beyond Phase 1 launch scope."
                         example="Scheduling/routes and equipment preventive maintenance are deferred to Phase 2 to protect launch focus on inspections, work items, and cases."
                         error={getErrorMessage(form.formState.errors, "phase2Roadmap.deferredModules")}
@@ -3066,7 +3276,7 @@ export function DiscoveryForm() {
                           "Which AI / predictive capabilities are important in the long-term vision?",
                           values.phase3Roadmap.selectedCapabilities
                         )}
-                        label="Which AI / predictive capabilities are important in the long-term vision?"
+                        label="Which AI or predictive capabilities matter most long term?"
                         explanation="Phase 3 capabilities should assume strong data maturity and are not expected in initial delivery."
                         example="Prioritize predictive risk detection, location health scoring, anomaly detection, and automated next-best action recommendations after core inspection and work-item data is stable."
                         error={getErrorMessage(form.formState.errors, "phase3Roadmap.selectedCapabilities")}
@@ -3097,7 +3307,7 @@ export function DiscoveryForm() {
                             values.phase3Roadmap.otherCapability,
                             (draft) => form.setValue("phase3Roadmap.otherCapability", draft, { shouldDirty: true, shouldValidate: true })
                           )}
-                          label="Describe the other Phase 3 capability"
+                          label="Describe the other phase 3 capability"
                           explanation="Name the capability explicitly."
                           example="Customer churn early-warning model by site portfolio"
                           error={getErrorMessage(form.formState.errors, "phase3Roadmap.otherCapability")}
@@ -3214,7 +3424,7 @@ export function DiscoveryForm() {
                           "When do you expect AI capabilities to be available?",
                           values.phase3Roadmap.timelineExpectation
                         )}
-                        label="When do you expect AI capabilities to be available?"
+                        label="When do you expect these AI capabilities to be available?"
                         explanation="Earlier expectations increase complexity and risk."
                         example="Phase 3 (recommended) after at least two quarters of stable structured data and baseline process adoption."
                         error={getErrorMessage(form.formState.errors, "phase3Roadmap.timelineExpectation")}
@@ -3267,7 +3477,7 @@ export function DiscoveryForm() {
                               { shouldDirty: true, shouldValidate: true }
                             )
                         )}
-                        label="How will you measure success of AI capabilities?"
+                        label="How will you measure success for these AI capabilities?"
                         explanation="Use specific measurable outcomes (for example percentages, thresholds, or SLA improvements)."
                         example="Reduce repeat high-risk findings by 25%, cut overdue work items older than 7 days by 35%, and improve location health score variance by 15% within 6 months."
                         minItems={1}
@@ -3283,7 +3493,7 @@ export function DiscoveryForm() {
                           values.phase3Roadmap.aiEnablementPrerequisites,
                           (draft) => form.setValue("phase3Roadmap.aiEnablementPrerequisites", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="What prerequisites must be met before enabling AI capabilities?"
+                        label="What must be in place before AI can be turned on?"
                         explanation="Describe data quality, stability period, and readiness controls required before rollout."
                         example="Require two quarters of stable inspection and work-item data quality, consistent taxonomy usage, and approved model governance checklist before production AI enablement."
                         error={getErrorMessage(form.formState.errors, "phase3Roadmap.aiEnablementPrerequisites")}
@@ -3298,7 +3508,7 @@ export function DiscoveryForm() {
                           values.phase3Roadmap.aiGovernanceOwner,
                           (draft) => form.setValue("phase3Roadmap.aiGovernanceOwner", draft, { shouldDirty: true, shouldValidate: true })
                         )}
-                        label="Who owns AI governance and production decision rights?"
+                        label="Who owns AI governance and final production decisions?"
                         explanation="Name the accountable owner role or function."
                         example="Director of Operational Excellence with joint approval from EHS and Data Governance for model changes and release readiness."
                         error={getErrorMessage(form.formState.errors, "phase3Roadmap.aiGovernanceOwner")}
