@@ -6,21 +6,21 @@ type CompanyEntry = {
 };
 
 const companies: CompanyEntry[] = [
-  { name: "Arbor Lane Property Group", href: "/client-access/arbor-lane-property-group" },
-  { name: "Beacon Facilities Co.", href: "/client-access/beacon-facilities-co" },
-  { name: "Blue Oak Building Services", href: "/client-access/blue-oak-building-services" },
-  { name: "Clearwater Site Management", href: "/client-access/clearwater-site-management" },
-  { name: "East Ridge Operations", href: "/client-access/east-ridge-operations" },
-  { name: "Harbor Point Maintenance", href: "/client-access/harbor-point-maintenance" },
-  { name: "Ironwood Compliance Group", href: "/client-access/ironwood-compliance-group" },
-  { name: "Lakeside Field Services", href: "/client-access/lakeside-field-services" },
-  { name: "Northfield Asset Care", href: "/client-access/northfield-asset-care" },
-  { name: "Pinecrest Portfolio Services", href: "/client-access/pinecrest-portfolio-services" },
-  { name: "Riverbend Operations LLC", href: "/client-access/riverbend-operations-llc" },
-  { name: "Summit Peak Property Services", href: "/client-access/summit-peak-property-services" },
-  { name: "Townline Facilities Partners", href: "/client-access/townline-facilities-partners" },
+  { name: "Brady Roofing", href: "/client-access/brady-roofing" },
+  { name: "Chadler's Plumbing", href: "/client-access/chadlers-plumbing" },
+  { name: "Clark & Clark, PC", href: "/client-access/clark-and-clark-pc" },
+  { name: "Complete CPA Solutions", href: "/client-access/complete-cpa-solutions" },
+  { name: "Gilman & CO. CPA", href: "/client-access/gilman-and-co-cpa" },
+  { name: "Golden Spike Roofing", href: "/client-access/golden-spike-roofing" },
+  { name: "High 5 Plumbing, Heating, Cooling & Electric", href: "/client-access/high-5-plumbing-heating-cooling-electric" },
+  { name: "Keemer Plumbing", href: "/client-access/keemer-plumbing" },
+  { name: "Lockhart & Powell CPAs", href: "/client-access/lockhart-and-powell-cpas" },
+  { name: "Mark Miller Subaru", href: "/client-access/mark-miller-subaru" },
+  { name: "My Denver Plumber", href: "/client-access/my-denver-plumber" },
+  { name: "Schomp Honda", href: "/client-access/schomp-honda" },
+  { name: "Towers Plumbing", href: "/client-access/towers-plumbing" },
   { name: "Verde", href: "/verde" },
-  { name: "Westbrook Building Solutions", href: "/client-access/westbrook-building-solutions" }
+  { name: "Valley Plumbing, Heating & Cooling", href: "/client-access/valley-plumbing-heating-cooling" }
 ];
 
 export default function StartScopeFormPage() {
