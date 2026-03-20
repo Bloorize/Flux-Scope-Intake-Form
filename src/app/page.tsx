@@ -44,7 +44,7 @@ export default function HomePage() {
               <Link className="landing-button-primary inline-flex h-9 items-center justify-center px-4 text-xs font-semibold" href="/sign-up">
                 Sign up
               </Link>
-              <Link className="px-1 py-2 text-sm font-semibold text-[#0f1723] underline decoration-[#94a3b8] underline-offset-4" href="/verde">
+              <Link className="px-1 py-2 text-sm font-semibold text-[#0f1723] underline decoration-[#94a3b8] underline-offset-4" href="/start-scope-form">
                 Start scope form
               </Link>
             </div>
@@ -75,7 +75,7 @@ export default function HomePage() {
               <Link className="landing-button-secondary inline-flex h-12 items-center justify-center px-6 text-sm font-semibold" href="/sign-in">
                 Sign in
               </Link>
-              <Link className="landing-button-primary inline-flex h-12 items-center justify-center px-6 text-sm font-semibold" href="/verde">
+              <Link className="landing-button-primary inline-flex h-12 items-center justify-center px-6 text-sm font-semibold" href="/start-scope-form">
                 Open Scope Form
               </Link>
             </div>
@@ -154,7 +154,7 @@ export default function HomePage() {
             <Link className="landing-button-secondary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/sign-in">
               Sign in
             </Link>
-            <Link className="landing-button-primary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/verde">
+            <Link className="landing-button-primary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/start-scope-form">
               Open Scope Form
             </Link>
           </div>
