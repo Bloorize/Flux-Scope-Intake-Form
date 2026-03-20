@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import heroBannerOne from "../images/hero_banner_1.png";
+import heroBannerThree from "../images/hero_banner_3.png";
 import heroBannerTwo from "../images/hero_banner_2.png";
 import ruxtonLogo from "../images/ruxton_logo_clear.png";
 
@@ -20,7 +21,7 @@ const heroSlides: HeroSlide[] = [
     image: heroBannerOne,
     headline: "Define it. Track it. Protect it.",
     description:
-      "Flux is the always-on desktop companion for agencies and consultancies that need tighter scope control, faster client decisions, and stronger project margins.",
+      "Flux is the always-on desktop companion for agencies and consultancies that need tighter scope control, faster client decisions, and stronger margins.",
     tone: "dark"
   },
   {
@@ -29,6 +30,13 @@ const heroSlides: HeroSlide[] = [
     description:
       "Convert raw documents, discussions, and ideas into an organized, committed scope pipeline in seconds.",
     tone: "light"
+  },
+  {
+    image: heroBannerThree,
+    headline: "Control delivery with confidence.",
+    description:
+      "Keep clients aligned, approvals traceable, and scope decisions visible from kickoff through handoff.",
+    tone: "dark"
   }
 ];
 
@@ -59,7 +67,6 @@ export default function HomePage() {
   };
 
   const currentSlide = heroSlides[activeSlide];
-  const isDarkSlide = currentSlide.tone === "dark";
 
   return (
     <main className="landing-root min-h-screen overflow-hidden">
@@ -117,67 +124,55 @@ export default function HomePage() {
               priority
               src={currentSlide.image}
             />
-            <div
-              className="pointer-events-none absolute inset-y-0 left-0 w-[62%]"
-              style={{
-                background: isDarkSlide
-                  ? "linear-gradient(90deg, rgba(5,10,22,0.82) 0%, rgba(5,10,22,0.58) 45%, rgba(5,10,22,0) 100%)"
-                  : "linear-gradient(90deg, rgba(248,250,255,0.95) 0%, rgba(248,250,255,0.76) 45%, rgba(248,250,255,0) 100%)"
-              }}
-            />
-
             <div className="absolute inset-0 flex items-center">
               <div className="w-full max-w-[54%] px-6 py-6 md:px-12">
                 <h1
-                  className={`text-balance text-4xl font-semibold tracking-[-0.03em] md:text-6xl ${
-                    isDarkSlide ? "text-white" : "text-[#0b1220]"
-                  }`}
+                  className="text-balance text-4xl font-semibold tracking-[-0.03em] text-[#0b1220] md:text-6xl"
                 >
                   {currentSlide.headline}
                 </h1>
-                <p className={`mt-4 max-w-xl text-balance text-base leading-7 md:text-2xl md:leading-9 ${isDarkSlide ? "text-white/85" : "text-[#475569]"}`}>
+                <p className="mt-4 max-w-xl text-balance text-base leading-7 text-[#0b1220] md:text-2xl md:leading-9">
                   {currentSlide.description}
                 </p>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <Link className="landing-button-secondary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/sign-in">
+                  <Link className="landing-button-secondary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold text-[#0b1220]" href="/sign-in">
                     Sign in
                   </Link>
-                  <Link className="landing-button-primary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold" href="/start-scope-form">
+                  <Link className="landing-button-primary inline-flex h-11 items-center justify-center px-5 text-sm font-semibold text-[#0b1220]" href="/start-scope-form">
                     Open Scope Form
                   </Link>
                 </div>
               </div>
             </div>
 
-            <div className="absolute bottom-4 right-4 flex items-center gap-2">
+            <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md bg-white/86 px-2 py-1.5 shadow-[0_8px_22px_rgba(15,23,35,0.2)]">
               <button
                 aria-label="Previous banner"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-white/88 text-[#0f1723] shadow-[0_8px_22px_rgba(15,23,35,0.2)] transition hover:bg-white"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#0f1723] transition hover:bg-white/80"
                 onClick={goPrevious}
                 type="button"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
+              <div className="mx-1 flex items-center gap-2">
+                {heroSlides.map((_, index) => (
+                  <button
+                    aria-label={`Go to banner ${index + 1}`}
+                    className={`h-2.5 rounded-full transition-all ${index === activeSlide ? "w-6 bg-[#0f1723]" : "w-2.5 bg-[#0f1723]/45"}`}
+                    key={index}
+                    onClick={() => goToSlide(index)}
+                    type="button"
+                  />
+                ))}
+              </div>
               <button
                 aria-label="Next banner"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-white/88 text-[#0f1723] shadow-[0_8px_22px_rgba(15,23,35,0.2)] transition hover:bg-white"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#0f1723] transition hover:bg-white/80"
                 onClick={goNext}
                 type="button"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
-            </div>
-
-            <div className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-2">
-              {heroSlides.map((_, index) => (
-                <button
-                  aria-label={`Go to banner ${index + 1}`}
-                  className={`h-2.5 rounded-full transition-all ${index === activeSlide ? "w-6 bg-white" : "w-2.5 bg-white/65"}`}
-                  key={index}
-                  onClick={() => goToSlide(index)}
-                  type="button"
-                />
-              ))}
             </div>
           </div>
         </section>
