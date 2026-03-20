@@ -6,21 +6,21 @@ type CompanyEntry = {
 };
 
 const companies: CompanyEntry[] = [
-  { name: "Accenture", href: "/client-access/accenture" },
-  { name: "CBRE", href: "/client-access/cbre" },
-  { name: "Cushman & Wakefield", href: "/client-access/cushman-wakefield" },
-  { name: "Deloitte", href: "/client-access/deloitte" },
-  { name: "Honeywell", href: "/client-access/honeywell" },
-  { name: "IBM", href: "/client-access/ibm" },
-  { name: "Johnson Controls", href: "/client-access/johnson-controls" },
-  { name: "Microsoft", href: "/client-access/microsoft" },
-  { name: "Oracle", href: "/client-access/oracle" },
-  { name: "SAP", href: "/client-access/sap" },
-  { name: "Schneider Electric", href: "/client-access/schneider-electric" },
-  { name: "ServiceNow", href: "/client-access/servicenow" },
-  { name: "Siemens", href: "/client-access/siemens" },
+  { name: "Arbor Lane Property Group", href: "/client-access/arbor-lane-property-group" },
+  { name: "Beacon Facilities Co.", href: "/client-access/beacon-facilities-co" },
+  { name: "Blue Oak Building Services", href: "/client-access/blue-oak-building-services" },
+  { name: "Clearwater Site Management", href: "/client-access/clearwater-site-management" },
+  { name: "East Ridge Operations", href: "/client-access/east-ridge-operations" },
+  { name: "Harbor Point Maintenance", href: "/client-access/harbor-point-maintenance" },
+  { name: "Ironwood Compliance Group", href: "/client-access/ironwood-compliance-group" },
+  { name: "Lakeside Field Services", href: "/client-access/lakeside-field-services" },
+  { name: "Northfield Asset Care", href: "/client-access/northfield-asset-care" },
+  { name: "Pinecrest Portfolio Services", href: "/client-access/pinecrest-portfolio-services" },
+  { name: "Riverbend Operations LLC", href: "/client-access/riverbend-operations-llc" },
+  { name: "Summit Peak Property Services", href: "/client-access/summit-peak-property-services" },
+  { name: "Townline Facilities Partners", href: "/client-access/townline-facilities-partners" },
   { name: "Verde", href: "/verde" },
-  { name: "Wipro", href: "/client-access/wipro" }
+  { name: "Westbrook Building Solutions", href: "/client-access/westbrook-building-solutions" }
 ];
 
 export default function StartScopeFormPage() {
