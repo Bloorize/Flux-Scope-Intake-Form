@@ -91,6 +91,88 @@ pre {
   z-index: 1;
 }
 
+/* ~90% browser-zoom density at 100% zoom; keeps the questionnaire from feeling oversized */
+.discovery-form-viewport {
+  zoom: 0.9;
+}
+
+/* Tint sits behind the heading words only, not full content width */
+.discovery-section-heading {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 0.45rem;
+  border: 1px solid transparent;
+  padding: 0.2rem 0.55rem;
+  vertical-align: top;
+}
+
+.discovery-section-heading--phase1 {
+  background: rgba(31, 115, 255, 0.09);
+  border-color: rgba(31, 115, 255, 0.16);
+}
+
+.discovery-section-heading--criticality {
+  background: rgba(176, 72, 92, 0.08);
+  border-color: rgba(176, 72, 92, 0.15);
+}
+
+.discovery-section-heading--baseline {
+  background: rgba(71, 88, 112, 0.08);
+  border-color: rgba(71, 88, 112, 0.14);
+}
+
+.discovery-section-heading--mobile {
+  background: rgba(13, 148, 136, 0.085);
+  border-color: rgba(13, 148, 136, 0.15);
+}
+
+.discovery-section-heading--offline {
+  background: rgba(88, 80, 200, 0.09);
+  border-color: rgba(88, 80, 200, 0.15);
+}
+
+.discovery-section-heading--integrations {
+  background: rgba(125, 94, 255, 0.095);
+  border-color: rgba(125, 94, 255, 0.16);
+}
+
+.discovery-section-heading--analytics-ai {
+  background: rgba(14, 116, 144, 0.085);
+  border-color: rgba(14, 116, 144, 0.15);
+}
+
+.discovery-section-heading--workflows {
+  background: rgba(34, 140, 90, 0.08);
+  border-color: rgba(34, 140, 90, 0.14);
+}
+
+.discovery-section-heading--scale {
+  background: rgba(168, 118, 48, 0.085);
+  border-color: rgba(168, 118, 48, 0.15);
+}
+
+.discovery-section-heading--delivery {
+  background: rgba(8, 132, 168, 0.085);
+  border-color: rgba(8, 132, 168, 0.15);
+}
+
+.discovery-section-heading--phase1-confirmation {
+  background: rgba(45, 88, 168, 0.085);
+  border-color: rgba(45, 88, 168, 0.15);
+}
+
+.discovery-section-heading--phase2-roadmap {
+  background: rgba(124, 92, 220, 0.09);
+  border-color: rgba(124, 92, 220, 0.15);
+}
+
+.discovery-section-heading--phase3-roadmap {
+  background: rgba(92, 108, 196, 0.09);
+  border-color: rgba(92, 108, 196, 0.15);
+}
+
 .app-surface-card {
   border-radius: 0.7rem;
   border: 1px solid rgba(15, 23, 35, 0.08);

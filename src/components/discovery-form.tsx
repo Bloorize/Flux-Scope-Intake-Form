@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Bot, Check, ChevronLeft, ChevronRight, CircleAlert, FileJson2, LoaderCircle, Sparkles } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useForm, useWatch, type Control, type FieldErrors, type Path, type Resolver, type UseFormRegister, type UseFormSetValue } from "react-hook-form";
 import {
   aiReviewResponseSchema,
@@ -55,6 +55,8 @@ type SubmissionState = {
   response: { status: string; receivedAt: string; id: string };
 };
 
+type SummaryPanelSubmission = Omit<SubmissionState, "response"> & { response?: SubmissionState["response"] };
+
 type QuestionAiState = {
   review?: AiReviewResponse;
   error?: string;
@@ -78,6 +80,9 @@ type ValidationIssue = {
 type QuestionNotesState = Record<string, string>;
 
 const DISCOVERY_DRAFT_STORAGE_KEY = "discovery-form-draft-v1";
+
+const HEADER_ACCOUNT_NAME = "Verde";
+const HEADER_PROJECT_NAME = "HeySage Intelligent Operations Platform";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -525,7 +530,7 @@ function FieldShell({
   const hasAiAssist = Boolean(ai);
 
   return (
-    <div className="space-y-4" data-question-shell="true">
+    <div className="scroll-mt-32 space-y-4 md:scroll-mt-36" data-question-shell="true">
       <div className="space-y-2">
         {questionNumber ? (
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">Question {String(questionNumber).padStart(2, "0")}</div>
@@ -843,7 +848,7 @@ function WorkflowEditor({
   );
 }
 
-function SummaryPanel({ submission }: { submission: SubmissionState }) {
+function SummaryPanel({ submission, preview }: { submission: SummaryPanelSubmission; preview?: boolean }) {
   const includedScope = submission.structured.phase1_scope ?? [];
   const phase2Features = submission.structured.phase_breakdown?.phase_2?.features ?? [];
   const phase3Capabilities = submission.structured.phase_breakdown?.phase_3?.capabilities ?? [];
@@ -857,7 +862,7 @@ function SummaryPanel({ submission }: { submission: SubmissionState }) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <Badge>Final output</Badge>
+          <Badge>{preview ? "Preview" : "Final output"}</Badge>
           <CardTitle>Phase 1 requirements document</CardTitle>
           <CardDescription>Use this as the source document for scoping, planning, and delivery alignment.</CardDescription>
         </CardHeader>
@@ -1043,7 +1048,9 @@ function SummaryPanel({ submission }: { submission: SubmissionState }) {
             <FileJson2 className="h-5 w-5 text-[var(--accent)]" />
             <CardTitle>Technical appendix (JSON)</CardTitle>
           </div>
-          <CardDescription>Submission ID: {submission.response.id}</CardDescription>
+          <CardDescription>
+            {submission.response ? `Submission ID: ${submission.response.id}` : "This payload will be sent when you submit."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <pre className="overflow-x-auto rounded-2xl bg-[var(--ink)] p-5 text-xs leading-6 text-white">
@@ -1064,12 +1071,14 @@ export function DiscoveryForm() {
   const [submission, setSubmission] = useState<SubmissionState | null>(null);
   const [submissionWarnings, setSubmissionWarnings] = useState<ValidationIssue[]>([]);
   const [showSubmitWarningDialog, setShowSubmitWarningDialog] = useState(false);
+  const [isFinalReviewStep, setIsFinalReviewStep] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [questionAiState, setQuestionAiState] = useState<Record<string, QuestionAiState>>({});
   const [questionNotes, setQuestionNotes] = useState<QuestionNotesState>({});
-  const isHeaderCondensed = false;
+  const [sectionQuestionCounts, setSectionQuestionCounts] = useState(() => discoverySections.map((s) => s.fieldPaths.length));
   const [isPending, startTransition] = useTransition();
   const questionSectionRef = useRef<HTMLElement | null>(null);
+  const questionnaireStickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const hasHydratedDraftRef = useRef(false);
   const aiProvider: AiProviderOption = "auto";
 
@@ -1247,11 +1256,53 @@ export function DiscoveryForm() {
       aiGovernanceOwner: watchedValues?.phase3Roadmap?.aiGovernanceOwner ?? defaultDiscoveryValues.phase3Roadmap.aiGovernanceOwner
     }
   };
-  const progress = useMemo(() => ((currentStep + 1) / discoverySections.length) * 100, [currentStep]);
+  const { progress, totalQuestionnaireQuestions, globalQuestionPosition } = useMemo(() => {
+    const questionsBefore = sectionQuestionCounts.slice(0, currentStep).reduce((acc, n) => acc + n, 0);
+    const total = sectionQuestionCounts.reduce((acc, n) => acc + n, 0);
+    const totalQuestionnaireQuestions = Math.max(total, 1);
+    const globalQuestionPosition = questionsBefore + currentQuestionIndex + 1;
+    if (isFinalReviewStep) {
+      return {
+        progress: 100,
+        totalQuestionnaireQuestions,
+        globalQuestionPosition: totalQuestionnaireQuestions
+      };
+    }
+    return {
+      progress: Math.min(100, (globalQuestionPosition / totalQuestionnaireQuestions) * 100),
+      totalQuestionnaireQuestions,
+      globalQuestionPosition
+    };
+  }, [sectionQuestionCounts, currentStep, currentQuestionIndex, isFinalReviewStep]);
+
+  const reviewPreview = useMemo((): { ok: true; data: SummaryPanelSubmission } | { ok: false; message: string } => {
+    try {
+      const validatedValues = discoveryFormSchema.parse(values) as DiscoveryValidatedValues;
+      const baseStructured = buildStructuredOutput(validatedValues);
+      const cleanedNotes = Object.entries(questionNotes).reduce<Record<string, string>>((accumulator, [fieldPath, note]) => {
+        const trimmed = note.trim();
+        if (trimmed) {
+          accumulator[fieldPath] = trimmed;
+        }
+        return accumulator;
+      }, {});
+      const structured: StructuredSubmission =
+        Object.keys(cleanedNotes).length > 0 ? { ...baseStructured, question_notes: cleanedNotes } : baseStructured;
+      const summary = buildReadableSummary(validatedValues);
+      const loe = classifyLoe(validatedValues);
+      return { ok: true, data: { structured, summary, loe } };
+    } catch {
+      return {
+        ok: false,
+        message: "Answers could not be summarized yet. Go back and fix any invalid fields."
+      };
+    }
+  }, [values, questionNotes]);
+
   const hasNextQuestionInSection = currentQuestionIndex < Math.max(questionCount - 1, 0);
   const activeSection = discoverySections[currentStep];
   const isFinalStep = currentStep === discoverySections.length - 1;
-  const canRetreat = currentStep > 0 || currentQuestionIndex > 0;
+  const canRetreat = currentStep > 0 || currentQuestionIndex > 0 || isFinalReviewStep;
   const entryStageOrder: Array<"welcome" | "scope-summary" | "blind-spots" | "questions"> = [
     "welcome",
     "scope-summary",
@@ -1260,6 +1311,17 @@ export function DiscoveryForm() {
   ];
   const entryStageIndex = entryStageOrder.indexOf(entryStage);
   const entryProgress = ((entryStageIndex + 1) / entryStageOrder.length) * 100;
+  const reviewSegmentFlex = Math.max(2, Math.round(totalQuestionnaireQuestions * 0.05));
+
+  const goToQuestionnaireSection = (sectionIndex: number) => {
+    setCurrentStep(sectionIndex);
+    setCurrentQuestionIndex(0);
+    setIsFinalReviewStep(false);
+  };
+
+  const goToQuestionnaireReview = () => {
+    setIsFinalReviewStep(true);
+  };
 
   const activeSectionData =
     activeSection.id === "phase1"
@@ -1325,6 +1387,7 @@ export function DiscoveryForm() {
         entryStage?: unknown;
         currentStep?: unknown;
         currentQuestionIndex?: unknown;
+        isFinalReviewStep?: unknown;
       };
 
       if (parsed.values !== undefined) {
@@ -1359,6 +1422,10 @@ export function DiscoveryForm() {
       if (typeof parsed.currentQuestionIndex === "number" && Number.isFinite(parsed.currentQuestionIndex)) {
         setCurrentQuestionIndex(Math.max(Math.trunc(parsed.currentQuestionIndex), 0));
       }
+
+      if (parsed.isFinalReviewStep === true && parsed.entryStage === "questions") {
+        setIsFinalReviewStep(true);
+      }
     } catch {
       window.localStorage.removeItem(DISCOVERY_DRAFT_STORAGE_KEY);
     }
@@ -1389,7 +1456,7 @@ export function DiscoveryForm() {
     }
   }, [values, questionNotes, entryStage, currentStep, currentQuestionIndex, submission]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const section = questionSectionRef.current;
     if (!section) {
       return;
@@ -1403,6 +1470,14 @@ export function DiscoveryForm() {
     });
 
     setQuestionCount((previous) => (previous === questions.length ? previous : questions.length));
+    setSectionQuestionCounts((previous) => {
+      if (previous[currentStep] === questions.length) {
+        return previous;
+      }
+      const next = [...previous];
+      next[currentStep] = questions.length;
+      return next;
+    });
     setQuestionTitles((previous) => {
       if (previous.length === nextTitles.length && previous.every((item, index) => item === nextTitles[index])) {
         return previous;
@@ -1410,16 +1485,33 @@ export function DiscoveryForm() {
       return nextTitles;
     });
 
-    const nextIndex = questions.length === 0 ? 0 : Math.min(currentQuestionIndex, questions.length - 1);
-    if (nextIndex !== currentQuestionIndex) {
-      setCurrentQuestionIndex(nextIndex);
-      return;
+    const clampedIndex = questions.length === 0 ? 0 : Math.min(currentQuestionIndex, questions.length - 1);
+    if (clampedIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(clampedIndex);
     }
 
     questions.forEach((question, index) => {
-      question.hidden = index !== nextIndex;
+      question.hidden = index !== clampedIndex;
     });
-  }, [activeSectionData, currentQuestionIndex, currentStep]);
+
+    if (entryStage !== "questions" || typeof window === "undefined") {
+      return;
+    }
+
+    const heading = section.querySelector<HTMLElement>("[data-question-section-heading='true']");
+    const scrollTarget = heading ?? section;
+    const sticky = questionnaireStickyHeaderRef.current;
+    const stickyBottom = sticky ? sticky.getBoundingClientRect().bottom : 0;
+    const gap = 12;
+    const delta = scrollTarget.getBoundingClientRect().top - stickyBottom - gap;
+    if (Math.abs(delta) > 1) {
+      const scrollRoot = (document.scrollingElement ?? document.documentElement) as HTMLElement;
+      const previousBehavior = scrollRoot.style.scrollBehavior;
+      scrollRoot.style.scrollBehavior = "auto";
+      window.scrollBy({ top: delta, left: 0, behavior: "auto" });
+      scrollRoot.style.scrollBehavior = previousBehavior;
+    }
+  }, [activeSectionData, currentQuestionIndex, currentStep, entryStage, isFinalReviewStep]);
 
   const setQuestionState = (fieldPath: string, updater: (current: QuestionAiState) => QuestionAiState) => {
     setQuestionAiState((current) => ({
@@ -1721,6 +1813,11 @@ export function DiscoveryForm() {
   };
 
   const retreatFlow = () => {
+    if (isFinalReviewStep) {
+      setIsFinalReviewStep(false);
+      return;
+    }
+
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex((index) => Math.max(index - 1, 0));
       return;
@@ -1744,7 +1841,7 @@ export function DiscoveryForm() {
       return;
     }
 
-    await submit();
+    setIsFinalReviewStep(true);
   };
 
   const toggleArrayValue = <T extends string>(path: Path<DiscoveryValidatedValues>, currentValues: T[], value: T) => {
@@ -1781,9 +1878,9 @@ export function DiscoveryForm() {
 
   if (submission) {
     return (
-      <main className="app-themed-root px-4 py-10 md:px-8">
+      <main className="app-themed-root px-4 py-8 md:px-8 md:py-9">
         <div className="app-hero-pattern" />
-        <div className="app-content-layer mx-auto max-w-3xl space-y-6">
+        <div className="app-content-layer discovery-form-viewport mx-auto max-w-4xl space-y-6">
           <Card className="app-surface-card">
             <CardHeader>
               <Badge>Submitted</Badge>
@@ -1805,6 +1902,7 @@ export function DiscoveryForm() {
                     setShowSubmitWarningDialog(false);
                     setCurrentQuestionIndex(0);
                     setCurrentStep(0);
+                    setIsFinalReviewStep(false);
                   }}
                   type="button"
                   variant="secondary"
@@ -1820,81 +1918,128 @@ export function DiscoveryForm() {
   }
 
   return (
-    <main className="app-themed-root px-4 py-10 md:px-8">
+    <main className="app-themed-root px-4 py-8 md:px-8 md:py-9">
       <div className="app-hero-pattern" />
-      <div className="app-content-layer mx-auto max-w-6xl space-y-6">
+      <div className="app-content-layer discovery-form-viewport mx-auto max-w-7xl space-y-5">
         <Card className="app-surface-card">
           <CardHeader
-            className={cn(
-              "sticky top-2 z-40 rounded-xl border border-[var(--border)] bg-white/88 shadow-[0_1px_2px_rgba(16,24,40,0.05),0_14px_40px_rgba(16,24,40,0.12)] backdrop-blur transition-all duration-200",
-              isHeaderCondensed ? "py-3" : "py-6"
-            )}
+            ref={questionnaireStickyHeaderRef}
+            className="sticky top-0 z-40 gap-1.5 rounded-xl border border-[var(--border)] bg-white/88 px-4 py-3 shadow-[0_1px_2px_rgba(16,24,40,0.05),0_14px_40px_rgba(16,24,40,0.12)] backdrop-blur sm:px-5 sm:py-3.5"
           >
-            <div className={cn("transition-all duration-200", isHeaderCondensed ? "space-y-2" : "space-y-3")}>
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className={cn("flex flex-wrap items-center transition-all duration-200", isHeaderCondensed ? "gap-2" : "gap-3")}>
-                  <div className="rounded-lg border border-[var(--border)] bg-white px-2.5 py-1.5">
-                  <Image
-                    src={ruxtonLogo}
-                    alt="Ruxton Labs logo"
-                    width={300}
-                    height={64}
-                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-11")}
-                    priority
-                  />
+            <div className="space-y-2">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-5">
+                <Image
+                  src={ruxtonLogo}
+                  alt="Ruxton Labs logo"
+                  width={300}
+                  height={64}
+                  className="h-[3.75rem] w-auto shrink-0 object-contain sm:h-[4.25rem]"
+                  priority
+                />
+                <h1 className="min-w-0 flex-1 truncate text-lg font-semibold tracking-tight text-[var(--foreground)] sm:text-xl">
+                  Scope Clarification Questionnaire
+                </h1>
+                <div className="flex min-w-0 max-w-[52%] shrink-0 flex-row items-center justify-end gap-3 sm:max-w-[55%] sm:gap-4">
+                  <div className="min-w-0 flex flex-col items-end gap-1">
+                    <p className="max-w-full truncate text-right text-xs leading-snug text-[var(--muted-foreground)] sm:text-sm">
+                      <span className="font-semibold text-[var(--foreground)]">Account:</span>{" "}
+                      {HEADER_ACCOUNT_NAME}
+                    </p>
+                    <p className="max-w-full truncate text-right text-xs leading-snug text-[var(--muted-foreground)] sm:text-sm">
+                      <span className="font-semibold text-[var(--foreground)]">Project:</span>{" "}
+                      {HEADER_PROJECT_NAME}
+                    </p>
                   </div>
-                  <div className="rounded-lg border border-[var(--border)] bg-white px-2.5 py-1.5">
                   <Image
                     src={verdeLogo}
                     alt="Verde Clean logo"
                     width={300}
                     height={64}
-                    className={cn("w-auto object-contain transition-all duration-200", isHeaderCondensed ? "h-8" : "h-11")}
+                    className="h-14 w-auto shrink-0 object-contain sm:h-16"
                     priority
                   />
-                  </div>
-                  <div
-                    className={cn(
-                      "rounded-full border border-[var(--border)] bg-white text-[var(--muted-foreground)] transition-all duration-200",
-                      isHeaderCondensed ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm"
-                    )}
-                  >
-                    HeySage Intelligent Operations Platform
-                  </div>
                 </div>
-                <h1
-                  className={cn(
-                    "font-semibold tracking-tight text-[var(--foreground)] transition-all duration-200",
-                    isHeaderCondensed ? "text-2xl md:text-3xl" : "text-4xl md:text-5xl"
-                  )}
-                >
-                  Scope Clarification Questionnaire
-                </h1>
               </div>
-              <div className={cn("space-y-2 border-t border-[var(--border)] transition-all duration-200", isHeaderCondensed ? "pt-1.5" : "pt-2")}>
-                <div
-                  className={cn(
-                    "flex items-center justify-between text-[var(--muted-foreground)] transition-all duration-200",
-                    isHeaderCondensed ? "text-[11px] uppercase tracking-[0.12em]" : "text-xs uppercase tracking-[0.16em]"
-                  )}
-                >
+              <div className="space-y-1.5 border-t border-[var(--border)]/70 pt-2">
+                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-[var(--muted-foreground)] sm:text-xs sm:tracking-[0.14em]">
                   {entryStage === "questions" ? (
                     <>
-                      <span>Overall progress</span>
-                      <span>
-                        Section {currentStep + 1} / {discoverySections.length}
+                      <span className="min-w-0 truncate pr-2">Overall progress</span>
+                      <span className="shrink-0">
+                        {isFinalReviewStep ? (
+                          "Review"
+                        ) : (
+                          <>
+                            Question {Math.min(globalQuestionPosition, totalQuestionnaireQuestions)} / {totalQuestionnaireQuestions}
+                          </>
+                        )}
                       </span>
                     </>
                   ) : (
                     <>
-                      <span>Getting started</span>
-                      <span>
+                      <span className="min-w-0 truncate pr-2">Getting started</span>
+                      <span className="shrink-0">
                         Step {entryStageIndex + 1} / {entryStageOrder.length}
                       </span>
                     </>
                   )}
                 </div>
-                <Progress value={entryStage === "questions" ? progress : entryProgress} />
+                {entryStage === "questions" ? (
+                  <div
+                    className="relative flex h-10 w-full items-center"
+                    role="navigation"
+                    aria-label="Jump to a questionnaire section"
+                  >
+                    <div
+                      className="pointer-events-none absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 overflow-hidden rounded-full bg-[var(--muted)]"
+                      aria-hidden
+                    >
+                      <div
+                        className="h-full rounded-full bg-[linear-gradient(90deg,var(--accent)_0%,#0f4c81_100%)] transition-[width] duration-300"
+                        style={{ width: `${Math.max(0, Math.min(100, isFinalReviewStep ? 100 : progress))}%` }}
+                      />
+                    </div>
+                    <div className="relative z-10 flex h-full w-full min-w-0">
+                      {discoverySections.map((section, sectionIndex) => {
+                        const flex = Math.max(1, sectionQuestionCounts[sectionIndex] ?? 1);
+                        const isActive = !isFinalReviewStep && currentStep === sectionIndex;
+                        return (
+                          <button
+                            key={section.id}
+                            type="button"
+                            className={cn(
+                              "relative h-full min-w-[12px] flex-1 rounded-md transition-colors",
+                              "hover:bg-[var(--foreground)]/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
+                              isActive &&
+                                "after:pointer-events-none after:absolute after:inset-x-1.5 after:bottom-2 after:h-px after:rounded-full after:bg-[var(--accent)]/45 after:content-['']"
+                            )}
+                            style={{ flex: `${flex} 1 0%` }}
+                            title={section.shortTitle}
+                            aria-label={`Section ${sectionIndex + 1}: ${section.shortTitle}`}
+                            aria-current={isActive ? "step" : undefined}
+                            onClick={() => goToQuestionnaireSection(sectionIndex)}
+                          />
+                        );
+                      })}
+                      <button
+                        type="button"
+                        className={cn(
+                          "relative h-full min-w-[36px] flex-1 rounded-md transition-colors",
+                          "hover:bg-[var(--foreground)]/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
+                          isFinalReviewStep &&
+                            "after:pointer-events-none after:absolute after:inset-x-1.5 after:bottom-2 after:h-px after:rounded-full after:bg-[var(--accent)]/45 after:content-['']"
+                        )}
+                        style={{ flex: `${reviewSegmentFlex} 1 0%` }}
+                        title="Final review"
+                        aria-label="Final review and submit"
+                        aria-current={isFinalReviewStep ? "step" : undefined}
+                        onClick={goToQuestionnaireReview}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <Progress className="h-1.5" value={entryProgress} />
+                )}
               </div>
             </div>
           </CardHeader>
@@ -1966,11 +2111,55 @@ export function DiscoveryForm() {
                   </Button>
                 </div>
               </div>
-            ) : (
-
-              <section className="space-y-6" ref={questionSectionRef}>
+            ) : isFinalReviewStep ? (
+              <section className="space-y-6">
                 <div className="space-y-2">
-                  <h2 className="text-xl font-semibold tracking-tight text-[var(--foreground)]">{activeSection.shortTitle}</h2>
+                  <h2 className="text-xl font-semibold tracking-tight text-[var(--foreground)]">Review and submit</h2>
+                  <p className="text-sm leading-6 text-[var(--muted-foreground)]">
+                    Confirm the generated scope record below. You can go back to change any answer, then submit when ready.
+                  </p>
+                </div>
+                {reviewPreview.ok ? (
+                  <SummaryPanel submission={reviewPreview.data} preview />
+                ) : (
+                  <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
+                    {reviewPreview.message}
+                  </div>
+                )}
+                {apiError ? (
+                  <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
+                    {apiError}
+                  </div>
+                ) : null}
+                <div className="border-t border-[var(--border)] pt-6">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Button disabled={!canRetreat || isPending} onClick={retreatFlow} type="button" variant="ghost">
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous question
+                    </Button>
+                    <Button
+                      className="w-full"
+                      disabled={isPending || !reviewPreview.ok}
+                      onClick={() => void submit()}
+                      type="button"
+                    >
+                      {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      Submit questionnaire
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <section className="space-y-6" ref={questionSectionRef}>
+                <div className="space-y-2" data-question-section-heading="true">
+                  <h2
+                    className={cn(
+                      "discovery-section-heading text-xl font-semibold tracking-tight text-[var(--foreground)]",
+                      `discovery-section-heading--${activeSection.id}`
+                    )}
+                  >
+                    SECTION {currentStep + 1}: {activeSection.shortTitle}
+                  </h2>
                   <p className="text-sm text-[var(--muted-foreground)]">
                     Question {Math.min(currentQuestionIndex + 1, Math.max(questionCount, 1))} of {Math.max(questionCount, 1)} in this section.
                   </p>
@@ -3519,8 +3708,8 @@ export function DiscoveryForm() {
                     <Button onClick={() => void advanceFlow()} type="button" disabled={isPending} className="w-full">
                       {isFinalStep && !hasNextQuestionInSection ? (
                         <>
-                          {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                          Submit questionnaire
+                          Continue to review
+                          <ChevronRight className="h-4 w-4" />
                         </>
                       ) : (
                         <>
@@ -3559,6 +3748,7 @@ export function DiscoveryForm() {
                       variant="ghost"
                       onClick={() => {
                         setShowSubmitWarningDialog(false);
+                        setIsFinalReviewStep(false);
                         setEntryStage("questions");
                         setCurrentStep(group.sectionIndex);
                         setCurrentQuestionIndex(0);
@@ -3581,6 +3771,7 @@ export function DiscoveryForm() {
                 variant="ghost"
                 onClick={() => {
                   setShowSubmitWarningDialog(false);
+                  setIsFinalReviewStep(false);
                 }}
               >
                 Improve answers
