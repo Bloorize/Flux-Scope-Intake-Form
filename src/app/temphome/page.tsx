@@ -266,6 +266,9 @@ export default function TempHomePage() {
             <div className="rounded-lg bg-white p-4 text-sm leading-7 text-[#334155] md:col-span-2 lg:col-span-1">
               <span className="font-semibold text-[#0f1723]">Values-driven:</span> Honest guidance, clear expectations, long-term partnerships.
             </div>
+            <div className="rounded-lg bg-white p-4 text-sm leading-7 text-[#334155]">
+              <span className="font-semibold text-[#0f1723]">Outcome-focused:</span> Every engagement ties back to measurable business progress.
+            </div>
           </div>
         </section>
 
