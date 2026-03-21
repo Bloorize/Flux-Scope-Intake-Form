@@ -283,6 +283,153 @@ pre {
   }
 }
 
+
+.image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgba(71, 85, 105, 0.4);
+  border-radius: 0.75rem;
+  background: rgba(226, 232, 240, 0.5);
+  color: #334155;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.75rem;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.image-placeholder-wide {
+  min-height: 260px;
+  aspect-ratio: 16 / 10;
+}
+
+.image-placeholder-hero {
+  min-height: 360px;
+  aspect-ratio: 16 / 7;
+}
+
+.image-placeholder-tall {
+  min-height: 320px;
+  aspect-ratio: 3 / 2;
+}
+
+.image-placeholder-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 0.55rem;
+  min-height: auto;
+  aspect-ratio: auto;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  padding: 0.35rem;
+}
+
+.image-placeholder-dark {
+  border-color: rgba(203, 213, 225, 0.45);
+  background: rgba(15, 23, 35, 0.24);
+  color: rgba(241, 245, 249, 0.9);
+}
+
+@media (max-width: 1024px) {
+  .image-placeholder-wide {
+    min-height: 220px;
+  }
+
+  .image-placeholder-hero {
+    min-height: 320px;
+  }
+
+  .image-placeholder-tall {
+    min-height: 260px;
+  }
+}
+
+.temphome-footer {
+  background: #0b1630;
+  color: #e2e8f0;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.temphome-footer-inner {
+  width: min(1240px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 3rem 0 2rem;
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.temphome-footer-heading {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.temphome-footer-links {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.temphome-footer-links a {
+  color: #e2e8f0;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: color 160ms ease;
+}
+
+.temphome-footer-links a:hover {
+  color: #93c5fd;
+}
+
+.temphome-social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+  transition: border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.temphome-social-link:hover {
+  color: #93c5fd;
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+}
+
+.temphome-footer-bottom {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 1rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 960px) {
+  .temphome-footer-inner {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .temphome-footer-inner {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-themed-root,
   .landing-root,
